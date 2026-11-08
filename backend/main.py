@@ -5,6 +5,7 @@ import tempfile
 from datetime import date, timedelta
 
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 
 from app.db import categorias, dashboard, inicializar, lancamentos, tetos
 from app.fatura.leitor import (
@@ -13,7 +14,17 @@ from app.fatura.leitor import (
     extrair_total_fatura,
 )
 
+# Origens de desenvolvimento do frontend — ADR-025
+ORIGENS_PERMITIDAS = [
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+
 app = Flask(__name__)
+# always_send=False: sem isso, requisição sem Origin receberia a 1ª origem da lista
+CORS(app, resources={r"/*": {"origins": ORIGENS_PERMITIDAS}}, always_send=False)
 
 
 @app.before_request

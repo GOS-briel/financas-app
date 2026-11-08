@@ -1034,6 +1034,42 @@ Configuração em `pyproject.toml` (`pythonpath = ["backend"]`, `--import-mode=i
 
 ---
 
+## ADR-025 — CORS: origens de desenvolvimento em lista fechada
+
+**Data:** 2026-11-08
+**Status:** Decidido
+
+### Contexto
+
+O frontend PWA (Etapa 12) será servido em outra origem (outra porta) e consumirá a API em `http://127.0.0.1:5000`. Sem headers CORS, o browser impede o JavaScript de ler as respostas.
+
+### Decisões
+
+**A. Origens em lista fechada** (`ORIGENS_PERMITIDAS`, no topo de `backend/main.py`): `localhost` e `127.0.0.1` nas portas 5500 (Live Server) e 8000 (`http.server`). As duas formas de host entram porque o browser as trata como origens diferentes.
+
+**B. Métodos e headers no padrão permissivo do flask-cors**, aplicado a todas as rotas.
+
+**C. `always_send=False`:** o padrão do flask-cors devolve a primeira origem da lista mesmo a quem não envia `Origin`. Sem `Origin`, a resposta sai sem headers CORS.
+
+### Justificativa
+
+1. Lista fechada em vez de `*`: a API lida com dados financeiros pessoais, e só estes dois servidores de desenvolvimento são usados.
+2. Restringir métodos e headers não acrescentaria proteção: o frontend usa todos os verbos da API, e a lista precisaria ser mantida a cada mudança.
+3. Constante no código: com 4 origens fixas de desenvolvimento, variável de ambiente seria complexidade sem uso.
+
+### Trade-offs aceitos
+
+- **Segurança em camadas, com a origem como camada principal:** qualquer método e header é aceito, mas só das origens da lista.
+- **CORS não impede a execução, só a leitura:** a origem fora da lista recebe a resposta sem `Allow-Origin`, e quem bloqueia é o browser. PUT, DELETE e POST com JSON passam por preflight e são barrados antes do envio; POST de formulário ou multipart não tem preflight. Como a API aceita formulário e não tem autenticação, uma página maliciosa aberta na máquina do dev consegue criar lançamentos ou importar fatura em `127.0.0.1:5000`, sem ler o retorno. O risco já existia antes do CORS e é limitado ao ambiente local.
+- **`file://` não funciona:** o browser envia `Origin: null`, fora da lista; o frontend precisa ser servido por um dos dois servidores.
+
+### Reabrir se:
+
+- Houver deploy em produção: adicionar o domínio real, considerar variável de ambiente para as origens e, junto com autenticação, exigir JSON nas escritas ou adicionar proteção CSRF.
+- O frontend passar a usar outra porta ou servidor de desenvolvimento.
+
+---
+
 ## Convenções deste arquivo
 
 - Decisões reabertas viram ADR-NNN-v2 com link pra versão anterior.

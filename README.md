@@ -85,6 +85,19 @@ Todas as respostas são JSON; erros vêm como `{"erro": "..."}`. Corpos aceitam 
 | POST | `/lancamentos/<id>/categorizar` | Categoriza **e** ensina o app (ou descategoriza com `null`) | 017, 019, 020 |
 | GET | `/dashboard?mes=&ano=` | Visão do mês: hero (gasto vs orçamento), breakdown das 8 macro + "Sem categoria", últimos 3 lançamentos | 021, 022, 023 |
 
+## CORS
+
+A API só libera leitura cross-origin para as origens de desenvolvimento do frontend (ADR-025):
+
+| Origem | Servidor |
+|---|---|
+| `http://localhost:5500` e `http://127.0.0.1:5500` | Live Server do VS Code |
+| `http://localhost:8000` e `http://127.0.0.1:8000` | `python -m http.server` |
+
+Para adicionar outra, inclua a origem completa (esquema, host e porta) em `ORIGENS_PERMITIDAS`, no topo de `backend/main.py`, e reinicie a API.
+
+O frontend precisa ser servido por um desses servidores: aberto direto do disco (`file://`), o browser envia `Origin: null`, que fica fora da lista.
+
 ## Autor
 
 Gabriel de Oliveira Silva — [GOS-briel](https://github.com/GOS-briel)
