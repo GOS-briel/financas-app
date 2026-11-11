@@ -350,6 +350,7 @@ O total oficial do cabeçalho ("Total de fatura") também é extraído e compara
 
 - Outro banco/cartão for suportado (cada layout terá sua regra).
 - O usuário preferir competência pelo mês de fechamento.
+- Gabriel quer reavaliar competência pelo mês da compra após uso real (decidido manter em 2026-11-11). Contexto: a fatura com vencimento em 10/10 traz compras de setembro e é contada em outubro — o que o projeto chamava de "fatura de outubro" é a "fatura que vence em outubro". Mudar envolveria parser, ADRs 002/007/009, deduplicação e testes (etapa própria).
 
 ---
 
@@ -1155,6 +1156,93 @@ A Etapa 12 implementa o frontend PWA que consome a API Flask (CORS habilitado na
 - A arquitetura E2 (cores por categoria) for pedida — etapa própria
 - A arquitetura E3 (dark mode) for pedida — etapa própria
 - Chegar a Etapa 12.7 — decidir cache vs. vendor dos CDNs; incluir `manifest.json`, ícones e `favicon` (hoje o `favicon.ico` dá 404, sem efeito no app)
+
+---
+
+## ADR-027 — Dashboard: exibição, estados e formatação
+
+**Data:** 2026-11-11 (decisões e implementação, 12.3)
+**Status:** Decidido
+
+### Contexto
+
+Primeira tela do frontend com dados reais. O backend já calcula e ordena tudo em `GET /dashboard` (ADRs 021–023): hero, breakdown das 8 macro + "Sem categoria" e os 3 últimos lançamentos. O frontend **só exibe**: não recalcula valores nem reordena categorias. Os nomes de campo usados são os do `dashboard.py` (ex.: "sem nenhum teto" é `hero.total_teto === 0`; `convite_definir_teto` existe por categoria, não no hero).
+
+### Decisões
+
+**A. Navegação de mês compartilhada com o store**
+- Chevrons ‹ › no cabeçalho chamam `$store.app.trocarMes` (que já trata a virada dez → jan); o mês exibido é o do store, o mesmo das outras telas.
+- Fora do mês atual, faixa discreta "Mês encerrado" ou "Mês futuro" com o atalho "Voltar para hoje"; no mês atual, não aparece.
+- Cabeçalho "Olá, Gabriel" (`NOME_USUARIO`, v1 monousuário) e o mês por extenso ("Novembro 2026").
+
+**B. Hero**
+- **Com tetos:** "R$ X de R$ Y" com `gasto_com_teto` / `total_teto`, barra pelo `status` do hero e "N% do orçamento · <prazo>". Prazo: "faltam N dias" (ou "falta 1 dia" / "último dia do mês"), "mês fechado" no passado, "mês ainda não começou" no futuro.
+- **Tetos parciais:** a barra mede só o gasto com teto; abaixo, "Em categorias sem teto: + R$ Z" (`gasto_sem_teto`) e "Total do mês: R$ T" — o total real nunca some (ADR-022).
+- **Sem nenhum teto:** total do mês, sem barra, e convite só em texto: "Defina tetos por categoria para saber se está no controle."
+- Barras limitadas a 100% de largura.
+
+**C. Lista de categorias (na ordem do backend, ADR-023)**
+- Visíveis: gasto > 0 **ou** teto definido. Cada linha: nome, "R$ gasto de R$ teto" e mini-barra pela cor do status (`quase_no_teto` usa as variáveis de "alerta"); estourada mostra "+R$ X acima do teto"; com gasto e sem teto, "R$ X · sem teto", sem barra.
+- Teto 0 com gasto (percentual `null`, ADR-022): barra cheia vermelha. Teto 0 sem gasto: barra vazia.
+- "Sem categoria" com valor aparece no fim da lista visível como "R$ X · N para categorizar"; com 0, vai para o recolhido.
+- As demais (sem gasto e sem teto) ficam numa linha "N categorias sem movimento", que expande ao tocar. Em mês vazio, essa linha não aparece.
+- A borda esquerda de cada categoria usa a camada 3 do CSS (`--cor-cat-*`, neutra na v1 — pronta para E2).
+
+**D. Estados visualmente distintos**
+- **Primeira carga** (sem dados ainda): "Carregando…".
+- **Troca de mês:** o conteúdo anterior fica com opacidade reduzida até o novo chegar (sem piscar).
+- **Erro:** faixa vermelha do store (ADR-026) + botão "Tentar de novo" na tela; uma busca bem-sucedida limpa a faixa.
+- **Mês vazio** (todas as categorias com `quantidade` 0): hero em R$ 0,00 e "Nenhum gasto em <mês> ainda. Toque no + para registrar."
+
+**E. Formatação centralizada em `js/util/formatadores.js`** (`window.formatar`, script comum como o `api.js`):
+- `dinheiro` com `Intl.NumberFormat('pt-BR', BRL)` → "R$ 1.240,50" (espaço inquebrável após o "R$").
+- `percentual` inteiro **arredondado para baixo**: 99,6% não aparece como "100%" sem o teto ter sido atingido.
+- `dataCurta` **fatia o texto** "2026-11-03" → "03/11", sem `Date`: `new Date("2026-11-03")` é UTC e mostraria 02/11 no fuso de Brasília.
+- `mes` monta `new Date(ano, mes - 1, 1)` (fuso local) → "Novembro 2026".
+- Valores em fonte monoespaçada (classe `.numero`).
+
+**F. Atualização sem cache**
+- Busca `/dashboard` quando a tela fica visível e quando o mês muda.
+- **(12.3) Uma chave única `ano-mes`** no `$watch`: na virada dez → jan, mês e ano mudam juntos e duas observações separadas disparariam duas buscas.
+- **(12.3) Tela escondida não busca:** se o mês mudar em outra tela, o Dashboard recarrega ao voltar a ficar visível.
+- **(12.3) Número de sequência:** só a resposta da busca mais recente é aplicada — cliques rápidos nos chevrons não deixam um mês antigo sobrescrever o atual.
+
+### Justificativa
+
+1. Exibir sem recalcular mantém uma única fonte de verdade (o backend testado, ADR-024) — o frontend não diverge dos números.
+2. Mostrar o total real ao lado do gasto com teto evita a leitura enganosa de um hero "folgado" que esconde gasto fora do orçamento.
+3. Recolher as categorias zeradas mantém o foco no que tem movimento, sem esconder que elas existem.
+4. Estados distintos evitam tela em branco ou piscando — a troca de mês parece instantânea.
+5. Formatação centralizada evita divergência entre telas e o erro clássico de fuso com datas ISO.
+
+### Validação (12.3)
+
+- **Headless (Edge):** a tela foi renderizada de verdade com a API real e com a demonstração, em 6 cenários (mês com tetos parciais e estouros, mês vazio com tetos herdados, mês futuro, mês sem tetos, mês atual vazio, API fora do ar), conferidos por screenshot.
+- **Navegador (Gabriel):** os dois modos do roteiro, virada de ano com uma única requisição, cliques rápidos, console sem erros e largura de celular sem corte.
+- **Backend inalterado:** 338 testes passando.
+
+### Ferramenta de demonstração
+
+`scripts/demo_dashboard.py` sobe a API num banco **novo, com dados fictícios** (nunca abre nem copia o `financas.db` real), com todos os cenários relativos ao mês atual — serve para testar as telas e demonstrar o app sem dados pessoais. Aceita `--porta` e **recusa porta ocupada**: no Windows, o Flask sobe numa porta já em uso sem acusar erro, e as requisições iriam para o outro servidor (com o banco real). Não é coletado pelo pytest nem entra na cobertura.
+
+### Trade-offs aceitos
+
+- **Duas requisições por troca de mês** (`/tetos` pelo store e `/dashboard` pela tela); o Dashboard não usa os tetos do store hoje, mas as próximas telas vão usar.
+- **Sem skeleton:** a primeira carga é só "Carregando…" — suficiente com a API local.
+- **Convite sem botão** enquanto a tela de editar tetos não existir.
+- **Sem cache:** toda visita refaz a busca.
+- **Amarelo de alerta** (`--amarelo-dark`) com aparência de mostarda na barra.
+- **"R$ 0,00 de R$ 0,00"** para teto zero sem gasto.
+- Lançamentos importados aparecem com o dia 01 (ADR-007), o que pode estranhar à primeira vista.
+- A validação headless não cobre cliques nem larguras abaixo de ~500 px (limite do Windows); esses ficam no teste manual.
+
+### Reabrir se:
+
+- Registrar e Histórico existirem: rever as duas requisições por troca de mês (se ninguém usar os tetos do store, buscar só sob demanda).
+- A rede hospedada deixar a primeira carga lenta: skeleton no polimento.
+- A tela de tetos existir: botão no convite.
+- O recarregamento ficar perceptível: cache por mês, invalidado nas escritas.
+- Polimento visual: revisar o tom do amarelo de alerta; trocar "R$ 0,00 de R$ 0,00" por um texto como "sem gastos permitidos".
 
 ---
 

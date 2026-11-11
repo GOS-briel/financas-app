@@ -19,6 +19,7 @@
        alpine:init; o Alpine vem POR ÚLTIMO e se inicializa sozinho
        (a versão CDN não deve receber Alpine.start() manual). -->
   <script defer src="js/api.js"></script>
+  <script defer src="js/util/formatadores.js"></script>
   <script defer src="js/telas/dashboard.js"></script>
   <script defer src="js/telas/registrar.js"></script>
   <script defer src="js/telas/historico.js"></script>
@@ -35,12 +36,138 @@
   <main class="conteudo">
     <!-- SPA: as 4 telas ficam no mesmo HTML; o store decide qual aparece -->
     <section class="tela" x-data="dashboard" x-show="$store.app.telaAtiva === 'dashboard'" x-cloak>
-      <h1>Dashboard - em construção</h1>
-      <p class="texto-secundario" x-show="$store.app.carregando">Carregando…</p>
-      <p class="texto-secundario" x-show="!$store.app.carregando && !$store.app.erroApi">
-        Mês <span class="numero" x-text="$store.app.rotuloMes"></span> ·
-        <span class="numero" x-text="$store.app.categorias.length"></span> categorias carregadas da API
-      </p>
+      <!-- Cabeçalho: saudação + navegação de mês (store compartilhado, ADR-027 A) -->
+      <header class="dash-cabecalho">
+        <p class="texto-secundario">Olá, <span x-text="nomeUsuario"></span></p>
+        <div class="dash-mes">
+          <button type="button" class="botao-icone" aria-label="Mês anterior" @click="mesAnterior()">
+            <i class="ti ti-chevron-left" aria-hidden="true"></i>
+          </button>
+          <h1 x-text="rotuloMes" aria-live="polite"></h1>
+          <button type="button" class="botao-icone" aria-label="Próximo mês" @click="proximoMes()">
+            <i class="ti ti-chevron-right" aria-hidden="true"></i>
+          </button>
+        </div>
+      </header>
+
+      <div class="faixa-mes" x-show="posicaoMesExibido !== 0">
+        <span x-text="posicaoMesExibido < 0 ? 'Mês encerrado' : 'Mês futuro'"></span>
+        <button type="button" class="botao-link" @click="voltarParaHoje()">Voltar para hoje</button>
+      </div>
+
+      <!-- Estados (ADR-027 D) -->
+      <p class="texto-secundario" x-show="primeiraCarga">Carregando…</p>
+
+      <div class="dash-erro" x-show="erro && !carregando">
+        <button type="button" class="botao-secundario" @click="tentarDeNovo()">
+          <i class="ti ti-refresh" aria-hidden="true"></i> Tentar de novo
+        </button>
+      </div>
+
+      <template x-if="dados">
+        <div class="dash-conteudo" :class="{ 'atualizando': atualizando }" :aria-busy="carregando">
+
+          <!-- Hero (ADR-027 B) -->
+          <article class="cartao hero">
+            <template x-if="!semTetos">
+              <div class="hero__corpo">
+                <p class="hero__valores">
+                  <span class="numero hero__gasto" x-text="formatar.dinheiro(dados.hero.gasto_com_teto)"></span>
+                  <span class="texto-secundario">de <span class="numero" x-text="formatar.dinheiro(dados.hero.total_teto)"></span></span>
+                </p>
+                <div class="barra" role="progressbar" aria-label="Uso do orçamento" aria-valuemin="0" aria-valuemax="100"
+                     :aria-valuenow="Math.floor(dados.hero.percentual_uso)">
+                  <div class="barra__preenchimento" :class="classeStatus(dados.hero.status)"
+                       :style="`width: ${largura(dados.hero.percentual_uso, dados.hero.status)}%`"></div>
+                </div>
+                <p class="texto-secundario">
+                  <span class="numero" x-text="formatar.percentual(dados.hero.percentual_uso)"></span> do orçamento ·
+                  <span x-text="textoPrazo"></span>
+                </p>
+                <!-- Tetos parciais: o total real nunca some -->
+                <dl class="hero__extras" x-show="dados.hero.gasto_sem_teto > 0">
+                  <div>
+                    <dt>Em categorias sem teto</dt>
+                    <dd class="numero" x-text="`+ ${formatar.dinheiro(dados.hero.gasto_sem_teto)}`"></dd>
+                  </div>
+                  <div>
+                    <dt>Total do mês</dt>
+                    <dd class="numero" x-text="formatar.dinheiro(dados.hero.total_gasto)"></dd>
+                  </div>
+                </dl>
+              </div>
+            </template>
+            <template x-if="semTetos">
+              <div class="hero__corpo">
+                <p class="texto-secundario">Total do mês</p>
+                <p class="numero hero__gasto" x-text="formatar.dinheiro(dados.hero.total_gasto)"></p>
+                <p class="texto-secundario" x-text="textoPrazo"></p>
+              </div>
+            </template>
+          </article>
+
+          <p class="cartao convite" x-show="semTetos">Defina tetos por categoria para saber se está no controle.</p>
+
+          <p class="dash-vazio" x-show="mesVazio">
+            Nenhum gasto em <span x-text="rotuloMesDosDados"></span> ainda. Toque no + para registrar.
+          </p>
+
+          <!-- Categorias (ADR-027 C), na ordem do backend (ADR-023) -->
+          <section class="dash-secao" x-show="categoriasVisiveis.length > 0" aria-labelledby="titulo-categorias">
+            <h2 id="titulo-categorias">Categorias</h2>
+            <ul class="lista-categorias">
+              <template x-for="c in categoriasVisiveis" :key="chave(c)">
+                <li class="categoria" :style="estiloCategoria(c)">
+                  <div class="categoria__linha">
+                    <span class="categoria__nome" x-text="nomeCategoria(c)"></span>
+                    <span class="numero categoria__valor" x-text="valorCategoria(c)"></span>
+                  </div>
+                  <template x-if="c.teto !== null">
+                    <div class="barra barra--mini" role="progressbar" :aria-label="`Uso do teto de ${nomeCategoria(c)}`"
+                         aria-valuemin="0" aria-valuemax="100" :aria-valuenow="Math.floor(c.percentual ?? 100)">
+                      <div class="barra__preenchimento" :class="classeStatus(c.status)"
+                           :style="`width: ${largura(c.percentual, c.status)}%`"></div>
+                    </div>
+                  </template>
+                  <p class="categoria__estouro numero" x-show="c.status === 'estourado'" x-text="textoEstouro(c)"></p>
+                </li>
+              </template>
+            </ul>
+          </section>
+
+          <div class="dash-recolhidas" x-show="!mesVazio && categoriasRecolhidas.length > 0">
+            <button type="button" class="botao-recolhidas" :aria-expanded="mostrarRecolhidas.toString()"
+                    @click="mostrarRecolhidas = !mostrarRecolhidas">
+              <span x-text="rotuloRecolhidas"></span>
+              <i class="ti" :class="mostrarRecolhidas ? 'ti-chevron-up' : 'ti-chevron-down'" aria-hidden="true"></i>
+            </button>
+            <ul class="lista-recolhidas texto-secundario" x-show="mostrarRecolhidas">
+              <template x-for="c in categoriasRecolhidas" :key="chave(c)">
+                <li x-text="nomeCategoria(c)"></li>
+              </template>
+            </ul>
+          </div>
+
+          <!-- Últimos lançamentos -->
+          <section class="dash-secao" x-show="dados.ultimos_lancamentos.length > 0" aria-labelledby="titulo-ultimos">
+            <h2 id="titulo-ultimos">Últimos lançamentos</h2>
+            <ul class="lista-lancamentos">
+              <template x-for="l in dados.ultimos_lancamentos" :key="l.id">
+                <li class="lancamento">
+                  <div class="lancamento__texto">
+                    <p class="lancamento__descricao" x-text="l.descricao"></p>
+                    <p class="texto-secundario">
+                      <span class="numero" x-text="formatar.dataCurta(l.data)"></span> ·
+                      <span x-text="l.subcategoria_nome ?? 'Sem categoria'"></span>
+                    </p>
+                  </div>
+                  <span class="numero lancamento__valor" x-text="formatar.dinheiro(l.valor)"></span>
+                </li>
+              </template>
+            </ul>
+          </section>
+        </div>
+      </template>
     </section>
 
     <section class="tela" x-data="registrar" x-show="$store.app.telaAtiva === 'registrar'" x-cloak>
