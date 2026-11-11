@@ -1,0 +1,132 @@
+/* Estilos dos componentes — usam só variáveis de tema e categorias (variables.css) */
+
+/* Esconde o que o Alpine controla até ele inicializar (evita as 4 telas piscarem) */
+[x-cloak] {
+  display: none !important;
+}
+
+body {
+  font-family: var(--fonte-base);
+  background: var(--cor-fundo);
+  color: var(--cor-texto);
+}
+
+/* ---------- Utilitárias ---------- */
+.texto-secundario {
+  color: var(--cor-texto-secundario);
+}
+
+.numero {
+  font-family: var(--fonte-numeros);
+  font-variant-numeric: tabular-nums;
+}
+
+.oculto-visualmente {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- Layout das telas ---------- */
+.conteudo {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: var(--espaco-lg) var(--espaco-md);
+  /* Espaço para a barra fixa não cobrir o fim do conteúdo (+ área de gestos do iPhone) */
+  padding-bottom: calc(var(--altura-barra-inferior) + var(--espaco-lg) + env(safe-area-inset-bottom));
+}
+
+.tela {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-md);
+}
+
+.tela h1 {
+  font-size: 1.5rem;
+  line-height: 1.2;
+}
+
+/* ---------- Faixa de erro da API ---------- */
+.faixa-erro {
+  padding: var(--espaco-sm) var(--espaco-md);
+  background: var(--cor-estado-estourado);
+  color: var(--cor-estado-estourado-texto);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+/* ---------- Barra inferior ---------- */
+.barra-inferior {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  align-items: center;
+  height: calc(var(--altura-barra-inferior) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--cor-fundo);
+  border-top: 1px solid var(--cor-borda);
+}
+
+.barra-inferior__item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 1.5rem;
+  color: var(--cor-texto-secundario);
+  transition: color 0.15s;
+}
+
+.barra-inferior__item:hover:not(:disabled),
+.barra-inferior__item.ativo {
+  color: var(--cor-primaria);
+}
+
+.barra-inferior__item:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.barra-inferior__item:disabled {
+  opacity: 0.35;
+}
+
+/* Botão + central: preto, circular, destacado */
+.barra-inferior__mais {
+  justify-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tamanho-botao-mais);
+  height: var(--tamanho-botao-mais);
+  border-radius: 50%;
+  background: var(--cor-primaria);
+  color: var(--cor-fundo);
+  font-size: 1.5rem;
+  transition: transform 0.15s, opacity 0.15s;
+}
+
+.barra-inferior__mais:hover {
+  opacity: 0.85;
+}
+
+.barra-inferior__mais:active {
+  transform: scale(0.92);
+}
+
+.barra-inferior__mais[aria-current="page"] {
+  outline: 2px solid var(--cor-primaria);
+  outline-offset: 3px;
+}
+
+/* Foco visível para navegação por teclado */
+.barra-inferior button:focus-visible {
+  outline: 2px solid var(--cor-primaria);
+  outline-offset: 2px;
+}

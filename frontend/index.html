@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <title>Finanças</title>
+
+  <!-- Ícones: Tabler via webfont (ADR-026) -->
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.51.0/tabler-icons.min.css"
+        integrity="sha512-rNRApBa8uVGZdkCyRt5p1VKY6XlAN5iXbKtJfpMassLFruWL5L/IOJmA5jFPU7R/HgVK9+Th0rUiPTFRYss4pg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer">
+  <link rel="stylesheet" href="css/reset.css">
+  <link rel="stylesheet" href="css/variables.css">
+  <link rel="stylesheet" href="css/style.css">
+
+  <!-- Ordem importa: nossos scripts registram store e telas no evento
+       alpine:init; o Alpine vem POR ÚLTIMO e se inicializa sozinho
+       (a versão CDN não deve receber Alpine.start() manual). -->
+  <script defer src="js/api.js"></script>
+  <script defer src="js/telas/dashboard.js"></script>
+  <script defer src="js/telas/registrar.js"></script>
+  <script defer src="js/telas/historico.js"></script>
+  <script defer src="js/telas/importar.js"></script>
+  <script defer src="js/app.js"></script>
+  <script defer
+          src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.17.5/cdn.min.js"
+          integrity="sha512-6KnFhHgmSX+kDsTz55gSTvN6Q7LnjIregXoc1Tz/wvv2TLjJQ41zneZbAiHogivc0Q71Tv1OLxK9GDRjZQyscQ=="
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+<body x-data>
+  <div class="faixa-erro" role="alert" x-show="$store.app.erroApi" x-text="$store.app.erroApi" x-cloak></div>
+
+  <main class="conteudo">
+    <!-- SPA: as 4 telas ficam no mesmo HTML; o store decide qual aparece -->
+    <section class="tela" x-data="dashboard" x-show="$store.app.telaAtiva === 'dashboard'" x-cloak>
+      <h1>Dashboard - em construção</h1>
+      <p class="texto-secundario" x-show="$store.app.carregando">Carregando…</p>
+      <p class="texto-secundario" x-show="!$store.app.carregando && !$store.app.erroApi">
+        Mês <span class="numero" x-text="$store.app.rotuloMes"></span> ·
+        <span class="numero" x-text="$store.app.categorias.length"></span> categorias carregadas da API
+      </p>
+    </section>
+
+    <section class="tela" x-data="registrar" x-show="$store.app.telaAtiva === 'registrar'" x-cloak>
+      <h1>Registrar - em construção</h1>
+    </section>
+
+    <section class="tela" x-data="historico" x-show="$store.app.telaAtiva === 'historico'" x-cloak>
+      <h1>Histórico - em construção</h1>
+    </section>
+
+    <section class="tela" x-data="importar" x-show="$store.app.telaAtiva === 'importar'" x-cloak>
+      <h1>Importar - em construção</h1>
+    </section>
+  </main>
+
+  <nav class="barra-inferior" aria-label="Navegação principal">
+    <button type="button" class="barra-inferior__item" aria-label="Dashboard"
+            :class="{ 'ativo': $store.app.telaAtiva === 'dashboard' }"
+            :aria-current="$store.app.telaAtiva === 'dashboard' ? 'page' : null"
+            @click="$store.app.mostrarTela('dashboard')">
+      <i class="ti ti-home" aria-hidden="true"></i>
+    </button>
+
+    <button type="button" class="barra-inferior__item" aria-label="Histórico"
+            :class="{ 'ativo': $store.app.telaAtiva === 'historico' }"
+            :aria-current="$store.app.telaAtiva === 'historico' ? 'page' : null"
+            @click="$store.app.mostrarTela('historico')">
+      <i class="ti ti-history" aria-hidden="true"></i>
+    </button>
+
+    <button type="button" class="barra-inferior__mais" aria-label="Registrar lançamento"
+            :aria-current="$store.app.telaAtiva === 'registrar' ? 'page' : null"
+            @click="$store.app.mostrarTela('registrar')">
+      <i class="ti ti-plus" aria-hidden="true"></i>
+    </button>
+
+    <button type="button" class="barra-inferior__item" aria-label="Importar fatura"
+            :class="{ 'ativo': $store.app.telaAtiva === 'importar' }"
+            :aria-current="$store.app.telaAtiva === 'importar' ? 'page' : null"
+            @click="$store.app.mostrarTela('importar')">
+      <i class="ti ti-upload" aria-hidden="true"></i>
+    </button>
+
+    <!-- Tela de configurações ainda não existe -->
+    <button type="button" class="barra-inferior__item" aria-label="Configurações (em breve)" title="Em breve" disabled>
+      <i class="ti ti-settings" aria-hidden="true"></i>
+    </button>
+  </nav>
+</body>
+</html>

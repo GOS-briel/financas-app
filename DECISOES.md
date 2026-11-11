@@ -1070,6 +1070,94 @@ O frontend PWA (Etapa 12) será servido em outra origem (outra porta) e consumir
 
 ---
 
+## ADR-026 — Arquitetura do frontend PWA
+
+**Data:** 2026-11-10 (decisões, 12.1) / 2026-11-11 (implementação, 12.2)
+**Status:** Decidido
+
+### Contexto
+
+A Etapa 12 implementa o frontend PWA que consome a API Flask (CORS habilitado na Etapa 11.5, ADR-025). As decisões abaixo foram tomadas na sub-etapa 12.1, antes de qualquer código, e ajustadas no setup da 12.2 com o que a implementação revelou.
+
+### Decisões
+
+**A. Stack: Alpine.js (CDN)**
+- HTML + CSS + JavaScript simples, sem build process
+- Alpine.js 3.x via CDN para reatividade declarativa
+- Zero dependências de desenvolvimento (npm/yarn)
+- **(12.2) Versões exatas, nunca `@3.x`:** Alpine.js 3.17.5 e Tabler Icons 3.51.0, ambos do cdnjs, com `integrity` (SRI) e `crossorigin="anonymous"`. Atualizar é uma decisão explícita: trocar a versão e o hash juntos.
+
+**B. Estrutura: SPA (Single Page Application)**
+- Um `index.html` com as 4 telas como `<section>`
+- Alpine gerencia qual seção está visível via `x-show`; `x-cloak` evita as 4 telas piscarem antes de o Alpine iniciar
+- Zero recarregamento de página
+
+**C. Estado: híbrido (store global + locais)**
+- `Alpine.store('app')` para dados compartilhados: `telaAtiva`, `mes`, `ano`, `categorias`, `tetos`, além de `carregando` e `erroApi` (faixa de erro quando o backend não responde)
+- Cada tela tem seu próprio estado via `Alpine.data()` (`js/telas/`)
+- `trocarMes` normaliza mês fora de 1–12 (ex.: mês 13 → janeiro do ano seguinte) e recarrega os tetos, que dependem do mês (herança, ADR-013)
+- **(12.2) Registro no evento `alpine:init`, sem `Alpine.start()`.** A build CDN do Alpine se inicializa sozinha ao carregar; chamar `Alpine.start()` de novo o iniciaria duas vezes. Por isso:
+  - store e telas são registrados em `document.addEventListener('alpine:init', ...)`, que dispara antes de o Alpine processar o HTML;
+  - a carga inicial (categorias + tetos) fica no `init()` do store, chamado automaticamente pelo Alpine;
+  - ordem dos scripts, todos com `defer`: `api.js` → `telas/*.js` → `app.js` → **Alpine por último**.
+
+**D. Chamadas à API: fetch nativo**
+- Módulo `js/api.js` centraliza todas as rotas do backend
+- `BASE_URL` em constante (futura variável de ambiente)
+- **(12.2) Script comum, não módulo ES:** sem build, é o que deixa `api` global — inclusive no console do navegador (`await api.categorias()`), útil para depuração
+- **(12.2) Tratamento no helper:** erro HTTP vira `Error("409: <mensagem do backend>")`, com o `{"erro": ...}` da API (status e dados também ficam no objeto do erro); respostas 204 (DELETE) não são lidas como JSON; o upload da fatura usa `FormData` sem `Content-Type` manual (o navegador gera o boundary do multipart). Falha de rede (`TypeError`) vira mensagem amigável no store.
+
+**E. Design system: minimalista preto-e-branco com arquitetura futura**
+- Visual E1 (P&B) implementado agora
+- Variáveis CSS em 3 camadas: **base** (cores primitivas), **tema** (papéis: fundo, texto, borda, estados do teto) e **categorias** (uma por macro); componentes usam só tema e categorias
+- Camada de categorias existe, mas aponta para o neutro na v1 (preparo para E2)
+- Camada de tema prepara o dark mode futuro (E3)
+- Espaçamento em múltiplos de 4px; fonte do sistema e monoespaçada (tabular) para números
+
+**F. Navegação: bottom bar fixa**
+- Barra inferior com 5 posições: Dashboard, Histórico, **+** (Registrar), Importar, Configurações
+- Botão + destacado (preto sólido, circular, 48px)
+- Ícones Tabler via webfont
+- **(12.2) Acessibilidade:** `<button>` reais com `aria-label` (só ícone) e `aria-current="page"` na tela ativa; foco visível por teclado. Configurações aparece desativada (`disabled`, "Em breve") até a tela existir
+- **(12.2) Safe area:** a barra e o conteúdo usam `env(safe-area-inset-bottom)` — a barra não fica sob a área de gestos do iPhone e não cobre o fim do conteúdo
+
+### Justificativa
+
+1. Stack simples casa com o princípio "fricção baixa" da v1
+2. SPA é essencial para a sensação de app nativo
+3. Estado híbrido evita duplicação (tudo local) e inchaço (tudo global)
+4. fetch nativo evita dependência externa para operações simples
+5. E1 com arquitetura futura = velocidade agora + preparo para evoluir sem retrabalho
+6. Bottom bar é o padrão mobile ergonomicamente superior
+7. Versões exatas + SRI: um CDN comprometido ou uma versão nova com mudança incompatível não altera o app em silêncio
+
+### Validação (12.2)
+
+- Por linha de comando: arquivos servidos na porta 5500; CORS conferido com `Origin: http://127.0.0.1:5500` e `http://localhost:5500` (GET e preflight de POST com JSON) e recusado para origem não listada
+- No navegador: console sem erros, navegação entre as 4 telas, destaque da tela ativa, `await api.categorias()` retornando as 8 macro e o store exibindo "8 categorias carregadas da API"
+- Sem testes automatizados de frontend nesta etapa (etapa própria futura); o CI continua validando o backend
+
+### Trade-offs aceitos
+
+- Alpine.js e Tabler Icons são dependências externas via CDN
+- **Offline (Etapa 12.7, Service Worker):** os arquivos de CDN precisarão entrar no cache do Service Worker ou virar cópia local (vendor) para o app funcionar offline. No Tabler 3.51, o CSS carrega a fonte dividida em dezenas de `.woff2` sob demanda — o cache precisa cobri-los (ou usar só os ícones necessários)
+- SPA precisa de "mini-router" manual (Alpine `x-show` resolve)
+- O mini-router não lida com o botão voltar do navegador nem com links diretos para uma tela (aceito para a v1)
+- CSS mais estruturado hoje = mais linhas, mas preparado para evoluir
+- Sem build, o JavaScript fica em escopo global compartilhado entre scripts — `api.js` usa uma IIFE e expõe só `window.api`
+- Sem Node na máquina do trabalho, não há checagem de sintaxe JS por linha de comando: a validação é pelo console do navegador
+
+### Reabrir se:
+
+- O volume de código JS crescer muito (> 1000 linhas) — considerar um framework completo
+- A PWA for validada e Gabriel decidir evoluir sem Flutter — migrar para React/Vue
+- Aparecer necessidade de deep links (URL por tela) — adicionar `history.pushState`
+- A arquitetura E2 (cores por categoria) for pedida — etapa própria
+- A arquitetura E3 (dark mode) for pedida — etapa própria
+- Chegar a Etapa 12.7 — decidir cache vs. vendor dos CDNs; incluir `manifest.json`, ícones e `favicon` (hoje o `favicon.ico` dá 404, sem efeito no app)
+
+---
+
 ## Convenções deste arquivo
 
 - Decisões reabertas viram ADR-NNN-v2 com link pra versão anterior.

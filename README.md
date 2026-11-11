@@ -1,6 +1,6 @@
 ﻿# Finanças App
 
-[![Testes](https://github.com/GOS-briel/Finan-as-app/actions/workflows/tests.yml/badge.svg)](https://github.com/GOS-briel/Finan-as-app/actions/workflows/tests.yml)
+[![Testes](https://github.com/GOS-briel/financas-app/actions/workflows/tests.yml/badge.svg)](https://github.com/GOS-briel/financas-app/actions/workflows/tests.yml)
 
 App de controle financeiro pessoal focado em fricção baixa (registrar um gasto em menos de 10 segundos) e controle por tetos macro de categorias.
 
