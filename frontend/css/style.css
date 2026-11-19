@@ -289,8 +289,16 @@ body {
 }
 
 .convite {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--espaco-sm);
   color: var(--cor-texto-secundario);
   border-style: dashed;
+}
+
+.convite .botao-secundario {
+  color: var(--cor-texto);
 }
 
 .dash-vazio {
@@ -560,6 +568,122 @@ body {
 
 .criar-sub .campo {
   flex: 1 1 180px;
+}
+
+/* ---------- Tetos ---------- */
+.faixa-pendente {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--espaco-sm);
+  padding: var(--espaco-sm) var(--espaco-md);
+  border-radius: var(--raio);
+  background: var(--cor-estado-alerta);
+  color: var(--cor-estado-alerta-texto);
+  font-size: 0.875rem;
+}
+
+.faixa-pendente__acoes {
+  display: flex;
+  align-items: center;
+  gap: var(--espaco-md);
+}
+
+.faixa-pendente .botao-link,
+.faixa-pendente .botao-icone {
+  color: inherit;
+}
+
+.tetos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-md);
+  transition: opacity 0.2s;
+}
+
+/* Troca de mês ou recarga depois de salvar: conteúdo anterior apagado */
+.tetos.atualizando {
+  opacity: 0.45;
+}
+
+.lista-tetos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-sm);
+}
+
+.teto {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--espaco-xs);
+  padding: var(--espaco-sm) var(--espaco-md);
+  border: 1px solid var(--cor-borda);
+  border-radius: var(--raio);
+}
+
+.teto__linha {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--espaco-md);
+  width: 100%;
+}
+
+.teto__nome {
+  font-weight: 600;
+}
+
+.teto__campo {
+  flex: 0 1 10rem;
+  min-width: 0;
+  text-align: right;
+}
+
+.teto__campo:disabled {
+  opacity: 0.5;
+}
+
+.teto__contexto {
+  color: var(--cor-texto-secundario);
+}
+
+.teto__marca {
+  display: flex;
+  gap: var(--espaco-sm);
+  font-weight: 600;
+}
+
+/* Herdado: decidido em outro mês — borda tracejada, valor em segundo plano */
+.teto--herdado {
+  border-style: dashed;
+}
+
+.teto--herdado .teto__campo {
+  color: var(--cor-texto-secundario);
+}
+
+/* Alterado e não salvo: borda forte (2px, compensada no padding) */
+.teto--alterado {
+  padding: calc(var(--espaco-sm) - 1px) calc(var(--espaco-md) - 1px);
+  border: 2px solid var(--cor-primaria);
+}
+
+.teto--erro {
+  border-color: var(--cor-estado-estourado-texto);
+}
+
+/* Botão de salvar sempre à mão, acima da barra inferior */
+.tetos__acoes {
+  position: sticky;
+  bottom: calc(var(--altura-barra-inferior) + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--espaco-xs);
+  padding: var(--espaco-sm) 0;
+  background: var(--cor-fundo);
 }
 
 /* ---------- Aviso global (acima da barra inferior) ---------- */

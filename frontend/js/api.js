@@ -48,6 +48,12 @@
   }
 
   window.api = {
+    // Texto para mostrar na tela: fetch lança TypeError quando não alcança
+    // o servidor (backend desligado, CORS); os demais trazem "status: erro"
+    mensagemDeErro: (erro) => (erro instanceof TypeError
+      ? 'Não foi possível conectar à API. Tente de novo.'
+      : erro.message),
+
     // Dashboard (ADRs 021-023)
     dashboard: (mes, ano) => get(`/dashboard?${consulta({ mes, ano })}`),
 

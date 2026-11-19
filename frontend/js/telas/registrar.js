@@ -13,8 +13,6 @@ const ICONE_DA_MACRO = {
   8: 'ti-dots',            // Outros
 };
 
-// 9 dígitos = até R$ 9.999.999,99
-const MAXIMO_DIGITOS_VALOR = 9;
 // Mesma janela do backend (ADR-015): hoje − 90 entra, data futura nunca
 const DIAS_RETROATIVO_MAXIMO = 90;
 // Limites do backend (main.py)
@@ -44,12 +42,6 @@ function focarQuandoVisivel(elemento, tentativas = 10) {
   if (tentativas === 0) return;
   const proximo = document.visibilityState === 'visible' ? requestAnimationFrame : setTimeout;
   proximo(() => focarQuandoVisivel(elemento, tentativas - 1));
-}
-
-function mensagemDeErro(erro) {
-  return erro instanceof TypeError
-    ? 'Não foi possível conectar à API. Tente de novo.'
-    : erro.message;
 }
 
 document.addEventListener('alpine:init', () => {
@@ -109,30 +101,17 @@ document.addEventListener('alpine:init', () => {
       this.minimoIso = isoDiasAtras(DIAS_RETROATIVO_MAXIMO);
     },
 
-    // ---------- Valor: máscara de centavos (decisão D) ----------
-    // Só o evento input: no teclado virtual do Android o keydown chega com
-    // keyCode 229, sem a tecla real. A cada mudança, os dígitos do campo viram
-    // o novo valor — cobre teclado físico, virtual, colar e apagar.
+    // ---------- Valor: máscara de centavos (decisão D, js/util/mascara.js) ----------
+    // Aqui zero não existe: campo sem valor = 0 centavos = "Informe o valor"
     aoDigitarValor(evento) {
-      const digitos = evento.target.value
-        .replace(/\D/g, '')
-        .replace(/^0+/, '')
-        .slice(0, MAXIMO_DIGITOS_VALOR);
-      this.centavos = digitos ? Number(digitos) : 0;
+      this.centavos = mascaraCentavos.ler(evento) ?? 0;
       this.mostrarValor();
     },
-    // Escreve direto no campo: se os centavos não mudarem (ex.: digitou uma
-    // letra), o Alpine não re-renderizaria e a letra ficaria lá
     mostrarValor() {
-      const campo = this.$refs.valor;
-      campo.value = this.centavos > 0 ? formatar.dinheiro(this.centavos / 100) : '';
-      this.cursorNoFim();
+      mascaraCentavos.escrever(this.$refs.valor, this.centavos > 0 ? this.centavos : null);
     },
     cursorNoFim() {
-      const campo = this.$refs.valor;
-      const fim = campo.value.length;
-      // Alguns navegadores só aceitam setSelectionRange com o campo focado
-      try { campo.setSelectionRange(fim, fim); } catch { /* sem efeito */ }
+      mascaraCentavos.cursorNoFim(this.$refs.valor);
     },
 
     // ---------- Categoria (decisão B) ----------
@@ -204,7 +183,7 @@ document.addEventListener('alpine:init', () => {
         if (erro.status === 409) {
           await this.usarExistente(nome, macroId);
         } else {
-          this.erroCriar = mensagemDeErro(erro);
+          this.erroCriar = api.mensagemDeErro(erro);
         }
       } finally {
         this.criandoEnviando = false;
@@ -215,7 +194,7 @@ document.addEventListener('alpine:init', () => {
       try {
         await this.$store.app.recarregarCategorias();
       } catch (erro) {
-        this.erroCriar = mensagemDeErro(erro);
+        this.erroCriar = api.mensagemDeErro(erro);
         return;
       }
       const macro = this.macros.find((m) => m.id === macroId);
@@ -288,7 +267,7 @@ document.addEventListener('alpine:init', () => {
         store.mostrarTela('dashboard');
         store.mostrarAviso(`Gasto salvo · ${formatar.dinheiro(valor)} em ${sub.nome}`, criado.id);
       } catch (erro) {
-        this.erro = mensagemDeErro(erro);
+        this.erro = api.mensagemDeErro(erro);
       } finally {
         this.enviando = false;
       }

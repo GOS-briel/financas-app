@@ -18,12 +18,12 @@ backend/
   app/fatura/leitor.py  parser da fatura Bradesco (pdfplumber)
   app/db/               SQL puro, um arquivo por recurso (ADR-004)
 frontend/
-  index.html            SPA: 4 telas como <section> (ADR-026)
+  index.html            SPA: cada tela é uma <section> (ADR-026)
   css/                  reset, variables (3 camadas), style
   js/api.js             window.api — todas as rotas do backend
   js/app.js             Alpine.store('app') — estado compartilhado
   js/telas/             Alpine.data por tela
-  js/util/              formatadores (window.formatar)
+  js/util/              formatadores (window.formatar), máscara de centavos (window.mascaraCentavos)
 scripts/demo_dashboard.py   API com banco fictício para testes visuais
 tests/                  unit / integration / e2e (pytest, ADR-024)
 .github/workflows/tests.yml  CI: pytest + cobertura a cada push (ADR-024)
@@ -91,6 +91,7 @@ Se, no meio do caminho, aparecer algo que mude uma decisão do briefing, **pare 
 
 - **Windows + Flask:** o Flask sobe numa porta já ocupada sem acusar erro, e as requisições vão para o outro processo. Confira a porta antes (o `demo_dashboard.py` já faz isso).
 - **PowerShell:** `if ($?)` depois de um pipe olha o resultado do pipe, não do comando. E `$LASTEXITCODE` depois de `| Select-Object -First N` vem `-1` mesmo com o comando bem-sucedido (o pipe é cortado). Em scripts de git, **valide o estado final** (ex.: comparar `git rev-parse main` com `origin/main`).
+- **Mensagem de commit no PowerShell 5.1:** passar a mensagem com várias linhas direto (here-string em `git commit -F -`) falhou na 12.4. Grave a mensagem num arquivo **UTF-8 sem BOM** e use `git commit -F arquivo`. Atenção: `Out-File -Encoding utf8` e `Set-Content -Encoding utf8` do 5.1 gravam **com** BOM; use `[IO.File]::WriteAllText(caminho, texto, [Text.UTF8Encoding]::new($false))` ou crie o arquivo pelo editor.
 - **Edge/Chrome headless no Windows:** não abre janela com menos de ~500 px de largura (larguras de celular ficam para o teste manual) e cada captura precisa do próprio perfil (`--user-data-dir`), senão o perfil fica travado pela execução anterior.
 - **`requirements.txt` está em UTF-16.** Preserve a codificação ao editar (conversão para UTF-8 fica para o polimento).
 - **Datas ISO no JavaScript:** `new Date("2026-11-03")` é UTC e mostra o dia anterior no fuso de Brasília. Use `formatar.dataCurta` ou monte com `new Date(ano, mes - 1, dia)`.

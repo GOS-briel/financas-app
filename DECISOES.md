@@ -1333,6 +1333,89 @@ Critério 1 da v1: registrar um gasto em **menos de 10 segundos**. A tela abre p
 
 ---
 
+## ADR-029 — Tela de tetos: edição em lote, herança visível e gasto como referência
+
+**Data:** 2026-11-19 (decisões e implementação, 12.7)
+**Status:** Decidido
+
+### Contexto
+
+Critério 5 da v1: editar o teto de uma categoria. Feita antes da 12.5 porque, sem tetos, o Dashboard não serve no uso real. O backend já resolve tudo: herança do mês anterior mais recente em runtime (ADR-013), `PUT /tetos` como upsert e `DELETE` que devolve o mês à herança (ADR-014), e teto 0 diferente de "sem teto" (ADR-022). O frontend exibe e envia; não recalcula herança nem gasto. Etapa só de frontend.
+
+### Decisões
+
+**A. Acesso**
+- A engrenagem da barra inferior deixa de estar desativada e abre "Tetos por categoria" (`aria-label`/`title`, `aria-current`).
+- O convite do Dashboard sem nenhum teto ganha o botão "Definir tetos", que abre a tela no mesmo mês.
+
+**B. Mês compartilhado**
+- A tela edita o mês do store (o mesmo do Dashboard), com os chevrons ‹ › e o mês por extenso.
+- Texto fixo: "Um teto vale para os meses seguintes até você mudar."
+
+**C. Lista das 8 macro, edição em lote**
+- Ordem canônica (ADR-005). Cada linha tem nome, campo de valor e uma linha de contexto: `<origem> [· não gastar nada] · gasto R$ X`, em que a origem é "definido neste mês", "herdado de <Mês Ano>" (`origem_mes`/`origem_ano`) ou "sem teto".
+- O gasto vem do `/dashboard` do mesmo mês, sem recálculo.
+- Visual: herdado com borda tracejada e valor em texto secundário; alterado e não salvo com borda de 2px na cor primária e a marca "Alterado"; falha com borda e mensagem na cor de estourado. Só variáveis de tema.
+- Um único botão "Salvar tetos (N alterados)", ativo só com alterações, mais o link "Descartar alterações". Envia só as linhas alteradas.
+- **Máscara de centavos compartilhada** com o Registrar, extraída para `js/util/mascara.js` (`window.mascaraCentavos`), sem duplicar a lógica da ADR-028 (só o evento `input`).
+
+**D. Voltar a herdar (no lote)**
+- Só em teto **definido neste mês**. A linha fica marcada "Volta a herdar ao salvar · Desfazer", conta no N, e o `DELETE /tetos` só sai no "Salvar". Regra única: **nada é gravado até salvar**, e "Descartar" também desfaz isso.
+- Teto herdado ou sem teto não tem essa ação (o DELETE daria 404, ADR-014).
+
+**E. Campo vazio × R$ 0 (menos ambíguo)**
+- **Campo vazio = sem alteração**, em qualquer linha. Apagar tudo deixa o campo vazio enquanto se edita; ao sair, ele volta a mostrar o valor original.
+- **R$ 0 só digitando 0.** Digitar ou colar "0" vira R$ 0,00 explícito ("não gastar nada"); apagar até não sobrar dígito nunca vira zero. A diferença vem do `inputType` do evento `input` (`delete…` × `insert…`), que também existe nos teclados do Android.
+- Digitar o mesmo valor que a linha já tem (inclusive o herdado) não conta como alteração.
+
+**F. Alterações não salvas ao sair (sem diálogo do navegador)**
+- Com alterações, os chevrons e a barra inferior não navegam. A tentativa vira `navegacaoPendente` no store e aparece a faixa inline "N alterações não salvas · Salvar e continuar · Descartar · ×".
+- "Salvar e continuar" executa a navegação **só se tudo salvar**. "Descartar" volta aos originais e navega. "×" cancela e continua editando.
+- A guarda fica em `mostrarTela` do store, que pergunta à tela de Tetos quantas alterações há (`alteracoesNaoSalvas`).
+
+**G. Salvar em sequência, com falha parcial tratada**
+- As requisições saem **uma por vez**, não em paralelo: o SQLite serializa escritas, e PUTs simultâneos poderiam esperar a vez ou falhar com "database is locked", gerando uma falha parcial artificial. Com no máximo 8 requisições locais, o custo é desprezível.
+- As linhas que deram certo viram o novo original. As que falharam mantêm o valor digitado e a marca de alterada, com "Não salvou: <motivo>" na própria linha. Mensagem geral: "2 de 3 tetos salvos. 1 não salvou: confira a linha marcada e tente de novo."
+- Com pelo menos um sucesso: recarrega os tetos (atualizando o store e preservando as linhas que falharam) e faz `revisao++` (o Dashboard observa, ADR-028).
+
+### Justificativa
+
+1. Lote com um botão só: definir os tetos do mês é uma tarefa de uma vez só, e o contador deixa claro o que vai ser gravado.
+2. Herança visível (origem + borda tracejada) mostra o que foi decidido e o que é automático, como pede a ADR-013.
+3. O gasto ao lado do teto dá a referência para decidir o valor sem trocar de tela.
+4. "Campo vazio = sem alteração" evita que apagar vire "não gastar nada" por acidente; zero é sempre uma decisão explícita (ADR-022).
+5. A faixa inline protege as alterações sem `confirm()`, que bloqueia a página e não segue o visual do app.
+
+### Validação (12.7)
+
+- **Headless (Edge, tempo real, demo na 5001):** 46 verificações dos tetos, todas OK em duas rodadas com banco limpo. Cobre contexto e visual, zero explícito × apagar, mesmo valor herdado, guarda (chevron, barra, ×, Salvar e continuar, Descartar), falha parcial simulada com **no máximo 1 requisição em voo**, herança no mês seguinte, Voltar a herdar (com Desfazer), reflexo no Dashboard, gasto de referência e convite.
+- **Regressão da 12.4:** 51 de 51 OK com a máscara extraída.
+- **Navegador (Gabriel):** roteiro completo OK, incluindo os casos de zero e a largura de celular.
+- **Backend inalterado:** 338 testes passando.
+
+### Limitações (pendências de backend, depois da v1)
+
+- **Não dá para tornar "sem teto daqui em diante" uma categoria que herda teto.** O `PUT /tetos` não aceita `null`, e o `DELETE` só apaga o teto do mês exato (a herança do anterior continua valendo). R$ 0 significa "não gastar nada", não "sem teto". Resolver exige o backend gravar um marcador de "sem teto" que interrompa a herança.
+- **Não dá para "congelar" um valor herdado.** Digitar o mesmo valor herdado não conta como alteração, então o mês continua herdando. Só importa se um mês anterior for alterado depois (a mudança se propaga, ADR-013); é raro, e contornável definindo outro valor.
+
+### Trade-offs aceitos
+
+- **Fechar ou recarregar a aba perde as alterações:** sem `beforeunload`, que mostraria um diálogo do navegador.
+- **Duas buscas de `/tetos` ao trocar de mês na tela** (a do `trocarMes` do store e a da tela, que também traz o `/dashboard`).
+- **Linha definida e alterada mostra também "Voltar a herdar":** clicar descarta a edição e marca para herdar. Duas ações na mesma linha, mas as duas são válidas.
+- **Borda tracejada discreta** (cor de borda do tema) nas herdadas.
+- O cursor sempre no fim do campo (como no Registrar): para trocar um valor herdado, apaga-se e digita-se.
+
+### Reabrir se:
+
+- O backend ganhar "sem teto daqui em diante" (marcador que interrompe a herança): ação "Remover teto" na linha.
+- "Congelar" um mês fizer falta: considerar que salvar o mesmo valor herdado conte como alteração.
+- A borda tracejada não bastar para distinguir herdado no uso real: reforçar no polimento.
+- Perder alterações ao fechar a aba acontecer na prática: rascunho local (`localStorage`) em vez de diálogo.
+- O backend ganhar escrita em lote: trocar a sequência de PUTs por uma requisição só.
+
+---
+
 ## Convenções deste arquivo
 
 - Decisões reabertas viram ADR-NNN-v2 com link pra versão anterior.

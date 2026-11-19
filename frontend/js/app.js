@@ -22,6 +22,12 @@ document.addEventListener('alpine:init', () => {
     // Aviso temporário global: { texto, lancamentoId } — lancamentoId habilita "Desfazer"
     aviso: null,
     desfazendo: false,
+    // Guarda de alterações não salvas (ADR-029): a tela de Tetos troca esta
+    // função por uma que conta as suas alterações. Com alterações, sair da tela
+    // não acontece na hora: vira navegacaoPendente e a tela mostra a faixa
+    // "Salvar e continuar · Descartar" (sem confirm() do navegador).
+    alteracoesNaoSalvas: () => 0,
+    navegacaoPendente: null, // { tipo: 'tela', nome } | { tipo: 'mes', mes, ano }
 
     // O Alpine chama init() do store automaticamente, logo após registrá-lo
     init() {
@@ -33,7 +39,25 @@ document.addEventListener('alpine:init', () => {
     },
 
     mostrarTela(nome) {
+      if (this.telaAtiva === 'tetos' && nome !== 'tetos' && this.alteracoesNaoSalvas() > 0) {
+        this.navegacaoPendente = { tipo: 'tela', nome };
+        return;
+      }
+      this.navegacaoPendente = null;
       this.telaAtiva = nome;
+    },
+
+    // Depois de "Salvar e continuar" (sem falhas) ou "Descartar"
+    continuarNavegacao() {
+      const pendente = this.navegacaoPendente;
+      this.navegacaoPendente = null;
+      if (!pendente) return;
+      if (pendente.tipo === 'tela') this.mostrarTela(pendente.nome);
+      else this.trocarMes(pendente.mes, pendente.ano);
+    },
+
+    cancelarNavegacao() {
+      this.navegacaoPendente = null;
     },
 
     // Aceita mês fora de 1-12 (ex.: mes + 1 em dezembro vira janeiro do ano seguinte)

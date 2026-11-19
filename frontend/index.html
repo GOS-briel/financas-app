@@ -20,8 +20,10 @@
        (a versão CDN não deve receber Alpine.start() manual). -->
   <script defer src="js/api.js"></script>
   <script defer src="js/util/formatadores.js"></script>
+  <script defer src="js/util/mascara.js"></script>
   <script defer src="js/telas/dashboard.js"></script>
   <script defer src="js/telas/registrar.js"></script>
+  <script defer src="js/telas/tetos.js"></script>
   <script defer src="js/telas/historico.js"></script>
   <script defer src="js/telas/importar.js"></script>
   <script defer src="js/app.js"></script>
@@ -106,7 +108,10 @@
             </template>
           </article>
 
-          <p class="cartao convite" x-show="semTetos">Defina tetos por categoria para saber se está no controle.</p>
+          <div class="cartao convite" x-show="semTetos">
+            <p>Defina tetos por categoria para saber se está no controle.</p>
+            <button type="button" class="botao-secundario" @click="$store.app.mostrarTela('tetos')">Definir tetos</button>
+          </div>
 
           <p class="dash-vazio" x-show="mesVazio">
             Nenhum gasto em <span x-text="rotuloMesDosDados"></span> ainda. Toque no + para registrar.
@@ -268,6 +273,79 @@
       </form>
     </section>
 
+    <section class="tela" x-data="tetos" x-show="$store.app.telaAtiva === 'tetos'" x-cloak>
+      <!-- Mesmo mês do store que o Dashboard (ADR-029 B) -->
+      <header class="dash-cabecalho">
+        <p class="texto-secundario">Tetos por categoria</p>
+        <div class="dash-mes">
+          <button type="button" class="botao-icone" aria-label="Mês anterior" @click="irParaMes(-1)">
+            <i class="ti ti-chevron-left" aria-hidden="true"></i>
+          </button>
+          <h1 x-text="rotuloMes" aria-live="polite"></h1>
+          <button type="button" class="botao-icone" aria-label="Próximo mês" @click="irParaMes(1)">
+            <i class="ti ti-chevron-right" aria-hidden="true"></i>
+          </button>
+        </div>
+      </header>
+      <p class="texto-secundario">Um teto vale para os meses seguintes até você mudar.</p>
+
+      <!-- Alterações não salvas ao tentar sair (sem confirm do navegador) -->
+      <div class="faixa-pendente" role="status" x-show="$store.app.navegacaoPendente">
+        <strong x-text="textoPendentes"></strong>
+        <div class="faixa-pendente__acoes">
+          <button type="button" class="botao-link" :disabled="salvando" @click="salvar()">Salvar e continuar</button>
+          <button type="button" class="botao-link" :disabled="salvando" @click="descartar()">Descartar</button>
+          <button type="button" class="botao-icone" aria-label="Continuar editando"
+                  @click="$store.app.cancelarNavegacao()">
+            <i class="ti ti-x" aria-hidden="true"></i>
+          </button>
+        </div>
+      </div>
+
+      <p class="texto-secundario" x-show="primeiraCarga">Carregando…</p>
+      <div class="dash-erro" x-show="erro && !carregando">
+        <button type="button" class="botao-secundario" @click="carregar()">
+          <i class="ti ti-refresh" aria-hidden="true"></i> Tentar de novo
+        </button>
+      </div>
+
+      <form class="tetos" novalidate x-show="linhas.length > 0" :class="{ 'atualizando': atualizando }"
+            :aria-busy="carregando" @submit.prevent="salvar()">
+        <ul class="lista-tetos">
+          <template x-for="l in linhas" :key="l.id">
+            <li class="teto" :class="classeLinha(l)">
+              <div class="teto__linha">
+                <label class="teto__nome" :for="`teto-${l.id}`" x-text="l.nome"></label>
+                <input :id="`teto-${l.id}`" class="campo teto__campo numero" type="text" inputmode="numeric"
+                       autocomplete="off" placeholder="Sem teto" :value="textoCampo(l)"
+                       :disabled="l.voltarAHerdar || salvando"
+                       @input="aoDigitar(l, $event)" @blur="aoSair(l, $event)"
+                       @focus="mascaraCentavos.cursorNoFim($event.target)"
+                       @click="mascaraCentavos.cursorNoFim($event.target)">
+              </div>
+              <p class="teto__contexto texto-pequeno" x-text="contexto(l)"></p>
+              <p class="teto__marca texto-pequeno" x-show="alterada(l)">
+                <span x-text="l.voltarAHerdar ? 'Volta a herdar ao salvar' : 'Alterado'"></span>
+                <button type="button" class="botao-link" x-show="l.voltarAHerdar"
+                        @click="desfazerVoltarAHerdar(l)">Desfazer</button>
+              </p>
+              <button type="button" class="botao-link texto-pequeno teto__herdar" x-show="podeVoltarAHerdar(l)"
+                      @click="voltarAHerdar(l)">Voltar a herdar</button>
+              <p class="erro-campo" role="alert" x-show="l.erro" x-text="`Não salvou: ${l.erro}`"></p>
+            </li>
+          </template>
+        </ul>
+
+        <div class="tetos__acoes">
+          <p class="texto-pequeno" aria-live="polite" x-text="mensagem"></p>
+          <button type="submit" class="botao-primario" :disabled="quantidadeAlterada === 0 || salvando"
+                  x-text="textoBotao"></button>
+          <button type="button" class="botao-link texto-pequeno" x-show="quantidadeAlterada > 0 && !salvando"
+                  @click="descartar()">Descartar alterações</button>
+        </div>
+      </form>
+    </section>
+
     <section class="tela" x-data="historico" x-show="$store.app.telaAtiva === 'historico'" x-cloak>
       <h1>Histórico - em construção</h1>
     </section>
@@ -317,8 +395,10 @@
       <i class="ti ti-upload" aria-hidden="true"></i>
     </button>
 
-    <!-- Tela de configurações ainda não existe -->
-    <button type="button" class="barra-inferior__item" aria-label="Configurações (em breve)" title="Em breve" disabled>
+    <button type="button" class="barra-inferior__item" aria-label="Tetos por categoria" title="Tetos por categoria"
+            :class="{ 'ativo': $store.app.telaAtiva === 'tetos' }"
+            :aria-current="$store.app.telaAtiva === 'tetos' ? 'page' : null"
+            @click="$store.app.mostrarTela('tetos')">
       <i class="ti ti-settings" aria-hidden="true"></i>
     </button>
   </nav>
