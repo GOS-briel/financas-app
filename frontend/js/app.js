@@ -5,6 +5,8 @@
 // sozinha, então NÃO há Alpine.start() aqui.
 document.addEventListener('alpine:init', () => {
   const hoje = new Date();
+  // Fora do store: o timer não precisa ser reativo
+  let timerAviso = null;
 
   Alpine.store('app', {
     telaAtiva: 'dashboard',
@@ -14,6 +16,12 @@ document.addEventListener('alpine:init', () => {
     tetos: [],
     carregando: false,
     erroApi: null,
+    // Sobe quando um lançamento muda fora do Dashboard (ex.: Desfazer):
+    // o Dashboard observa e recarrega (ADR-028)
+    revisao: 0,
+    // Aviso temporário global: { texto, lancamentoId } — lancamentoId habilita "Desfazer"
+    aviso: null,
+    desfazendo: false,
 
     // O Alpine chama init() do store automaticamente, logo após registrá-lo
     init() {
@@ -48,6 +56,40 @@ document.addEventListener('alpine:init', () => {
         this.registrarErro(erro);
       } finally {
         this.carregando = false;
+      }
+    },
+
+    // Depois de criar subcategoria: as telas leem as categorias daqui.
+    // Propaga o erro: quem chamou decide como mostrar.
+    async recarregarCategorias() {
+      this.categorias = await api.categorias();
+    },
+
+    mostrarAviso(texto, lancamentoId = null, duracaoMs = 5000) {
+      clearTimeout(timerAviso);
+      this.aviso = { texto, lancamentoId };
+      timerAviso = setTimeout(() => { this.aviso = null; }, duracaoMs);
+    },
+
+    fecharAviso() {
+      clearTimeout(timerAviso);
+      this.aviso = null;
+    },
+
+    async desfazerAviso() {
+      const id = this.aviso?.lancamentoId;
+      if (!id || this.desfazendo) return;
+      this.desfazendo = true;
+      clearTimeout(timerAviso); // não some no meio do DELETE
+      try {
+        await api.apagarLancamento(id);
+        this.revisao++;
+        this.mostrarAviso('Gasto desfeito', null, 3000);
+      } catch (erro) {
+        this.fecharAviso();
+        this.registrarErro(erro);
+      } finally {
+        this.desfazendo = false;
       }
     },
 

@@ -1246,6 +1246,93 @@ Primeira tela do frontend com dados reais. O backend já calcula e ordena tudo e
 
 ---
 
+## ADR-028 — Registrar gasto: descrição automática, subcategoria obrigatória e máscara de centavos
+
+**Data:** 2026-11-19 (decisões e implementação, 12.4)
+**Status:** Decidido
+
+### Contexto
+
+Critério 1 da v1: registrar um gasto em **menos de 10 segundos**. A tela abre pelo botão + central e grava com `POST /lancamentos` (ADR-015). O backend exige `descricao`, aceita `valor` 0 e trata `subcategoria_id` como opcional; as regras abaixo, mais estritas, ficam no frontend. Etapa só de frontend: o backend não mudou.
+
+### Decisões
+
+**A. Descrição opcional**
+- Vazia (ou só espaços) envia o **nome da subcategoria**, que aparece como placeholder do campo.
+- Nota opcional atrás de uma pill "Adicionar nota" (até 500 caracteres, como no backend).
+
+**B. Subcategoria obrigatória**
+- Grade 4x2 das macro na ordem canônica (ADR-005), com ícones Tabler: `ti-tools-kitchen-2`, `ti-confetti`, `ti-shopping-bag`, `ti-heartbeat`, `ti-school`, `ti-ball-football`, `ti-car`, `ti-dots`. Escolhas marcadas com `aria-pressed`.
+- Subcategorias em pills, na ordem da API (alfabética, ADR-012). Trocar de macro limpa a subcategoria.
+- Macro sem subcategoria abre direto a criação.
+- "Salvar gasto" só fica ativo com valor > 0, subcategoria e data válida. Abaixo do botão, o que falta: "Informe o valor", "Escolha a subcategoria", "Escolha uma data dos últimos 90 dias".
+
+**C. Depois de salvar**
+- Volta ao Dashboard **no mês da data do gasto** (`trocarMes`). Um gasto com "Outra data" no mês passado leva ao mês passado.
+- Aviso global por ~5s, "Gasto salvo · R$ X em Sub · Desfazer", numa região `aria-live="polite"` que fica sempre no DOM.
+- **Desfazer** faz `DELETE` e incrementa `$store.app.revisao`. O Dashboard observa esse contador e recarrega. Depois aparece "Gasto desfeito" por 3s.
+- Botão desativado durante o envio: duplo clique não grava duas vezes.
+- Erro no envio fica na própria tela e o botão volta a ficar ativo.
+
+**D. Valor com máscara de centavos**
+- Guardado como **inteiro de centavos** (3250 → R$ 32,50), sem erro de ponto flutuante até a divisão no envio.
+- `inputmode="numeric"`, máximo de 9 dígitos (R$ 9.999.999,99), zeros à esquerda descartados, zero não salva, cursor sempre no fim.
+- **Só o evento `input`, nunca `keydown`:** no teclado virtual do Android (Gboard, Samsung) o `keydown` chega com `keyCode 229`, sem a tecla real. A cada mudança, os dígitos do campo viram o novo valor e o campo é reescrito. Isso cobre teclado físico, virtual, colar ("R$ 1.234,56" → R$ 1.234,56) e apagar.
+- O campo é reescrito à mão (não por `x-model`): se os centavos não mudam (ex.: digitou uma letra), o Alpine não re-renderizaria e a letra ficaria na tela.
+
+**E. Data**
+- Pills Hoje / Ontem / Outra data. "Outra data" abre um `<input type="date">` com `min` = hoje − 90 e `max` = hoje (janela da ADR-015).
+- Datas sempre locais, com a nova `formatar.dataIso` (nunca `toISOString()`, que é UTC e depois das 21h em Brasília daria o dia seguinte).
+- O intervalo é conferido de novo no envio, com o relógio daquele momento (o dia pode virar com o app aberto).
+
+**F. Criação inline de subcategoria**
+- O "+" abre um campo inline "Criar e usar" (Enter cria, Esc cancela). A subcategoria criada já fica selecionada, e o store recarrega as categorias para todas as telas.
+- **409 (nome repetido):** a resposta não traz o `id`. O frontend recarrega `/categorias/macro`, acha o nome na macro com `NFC + minúsculas` (como a ADR-012 no backend, que usa `casefold`; para nomes em português o resultado é o mesmo) e seleciona a existente, com o aviso "já existia e foi selecionada".
+
+**G. Foco automático (desvio declarado na 12.4)**
+- O briefing previa `$watch` + `$nextTick` → `focus()`. Na implementação, **o foco falhava sem erro, inclusive no desktop**: o `x-show` do Alpine só exibe o elemento **no quadro seguinte** (`requestAnimationFrame`; `setTimeout` com a aba oculta), depois do `$nextTick`, e um `focus()` num elemento ainda com `display: none` é ignorado.
+- Solução: `$watch` + `$nextTick` → `focarQuandoVisivel(elemento)`, que espera com **o mesmo agendador que o Alpine usa** (rAF com a aba visível, `setTimeout` com ela oculta). Assim o callback de foco entra sempre na fila depois do que exibe o elemento (até 10 tentativas). Também é usado no nome da nova subcategoria, no input de data e na nota.
+- O formulário é limpo a cada abertura da tela.
+
+### Justificativa
+
+1. Descrição automática e subcategoria em dois toques tiram a digitação do caminho mais comum: o fluxo é valor → macro → sub → salvar.
+2. Subcategoria obrigatória evita acumular "Sem categoria" em gastos manuais, que, ao contrário da fatura, não têm sugestão automática.
+3. Centavos inteiros com máscara pela direita é o padrão de apps bancários: não exige achar a vírgula no teclado numérico.
+4. Levar o Dashboard ao mês do gasto mostra o efeito do registro na hora, e o Desfazer reduz o custo de um erro a um toque.
+5. Tratar o 409 selecionando a existente transforma o erro em resultado útil.
+
+### Validação (12.4)
+
+- **Critério 1:** cronometrado no desktop com o demo (abrir → + → valor → macro → sub → salvar, com subcategoria existente): **meta de < 10 s atingida** (tempo exato não anotado), com o valor digitado sem clicar no campo (foco automático funcionando).
+- **Headless (Edge, tempo real, demo na porta 5001):** roteiro automático com 51 verificações, todas OK em duas rodadas com banco limpo. Cobre máscara, grade e ícones, descrição automática, Desfazer, Ontem/Outra data e limites (hoje−91 e amanhã bloqueiam, hoje−90 libera), mês do Dashboard, criação com nome repetido em maiúsculas e em NFD, duplo envio e erro de conexão.
+- O `--virtual-time-budget` do headless **não serve** para esta tela: com tempo virtual o `requestAnimationFrame` atrasa ou não dispara. O roteiro rodou em tempo real e mandou o resultado por POST a um servidor local temporário.
+- **Navegador (Gabriel):** roteiro completo OK, incluindo modo celular do DevTools e erro com o demo parado.
+- **Backend inalterado:** 338 testes passando.
+
+### Trade-offs aceitos
+
+- **Duas buscas do Dashboard** quando o salvar muda o mês (os watchers de tela e de mês disparam); a `sequencia` da ADR-027 descarta a antiga.
+- **Um gasto por vez:** depois de salvar volta ao Dashboard; registrar vários em sequência exige reabrir pelo +.
+- **Subcategorias em ordem alfabética**, não por uso.
+- O aviso de 5s não pausa com foco ou mouse em cima.
+- O 10º dígito digitado no meio do valor (cursor reposicionado à mão) descarta o último dígito, não o digitado; o cursor volta ao fim a cada mudança.
+- "Salvar gasto" fica no fim do formulário; com o teclado virtual aberto, pode exigir rolagem.
+
+### A verificar no primeiro uso real no celular (12.8/12.9)
+
+- **Teclado abrindo sozinho:** no iOS (e em alguns Android) o `focus()` fora do próprio toque do usuário pode focar o campo **sem abrir o teclado**, e o `focarQuandoVisivel` roda um quadro depois do toque no +. Não foi possível testar nesta etapa (o `api.js` aponta para 127.0.0.1, o CORS só libera localhost, rede corporativa).
+- **Alternativa, se falhar:** um campo escondido que recebe o foco **dentro do próprio handler do toque no +** (o que abre o teclado) e repassa o foco ao campo de valor quando ele ficar visível.
+
+### Reabrir se:
+
+- Subcategorias mais usadas primeiro fizerem falta (exige backend: contagem por subcategoria).
+- Subcategoria obrigatória atrapalhar no uso real: considerar uma "Geral" automática por macro.
+- Registrar vários gastos em sequência for comum: opção "salvar e registrar outro".
+- O foco no celular não abrir o teclado: implementar a alternativa do campo escondido.
+
+---
+
 ## Convenções deste arquivo
 
 - Decisões reabertas viram ADR-NNN-v2 com link pra versão anterior.

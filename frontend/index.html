@@ -171,7 +171,101 @@
     </section>
 
     <section class="tela" x-data="registrar" x-show="$store.app.telaAtiva === 'registrar'" x-cloak>
-      <h1>Registrar - em construção</h1>
+      <h1>Registrar gasto</h1>
+
+      <!-- Sem categorias não dá para salvar: carregando ou erro (ADR-027 D) -->
+      <p class="texto-secundario" x-show="semCategorias && $store.app.carregando">Carregando categorias…</p>
+      <div class="dash-erro" x-show="semCategorias && !$store.app.carregando">
+        <p class="texto-secundario">Não foi possível carregar as categorias.</p>
+        <button type="button" class="botao-secundario" @click="$store.app.carregarDadosBase()">
+          <i class="ti ti-refresh" aria-hidden="true"></i> Tentar de novo
+        </button>
+      </div>
+
+      <form class="registrar" novalidate @submit.prevent="salvar()">
+        <!-- Valor: máscara de centavos só pelo evento input (ADR-028) -->
+        <label for="registrar-valor" class="oculto-visualmente">Valor</label>
+        <input id="registrar-valor" x-ref="valor" class="campo-valor numero" type="text"
+               inputmode="numeric" autocomplete="off" placeholder="R$ 0,00"
+               @input="aoDigitarValor($event)" @focus="cursorNoFim()" @click="cursorNoFim()">
+
+        <fieldset class="registrar__grupo" x-show="!semCategorias">
+          <legend>Categoria</legend>
+          <div class="grade-macros">
+            <template x-for="m in macros" :key="m.id">
+              <button type="button" class="macro" :aria-pressed="(macroId === m.id).toString()"
+                      @click="escolherMacro(m.id)">
+                <i class="ti" :class="icone(m.id)" aria-hidden="true"></i>
+                <span x-text="m.nome"></span>
+              </button>
+            </template>
+          </div>
+        </fieldset>
+
+        <fieldset class="registrar__grupo" x-show="macroSelecionada">
+          <legend>Subcategoria</legend>
+          <div class="pills">
+            <template x-for="s in subcategorias" :key="s.id">
+              <button type="button" class="pill" :aria-pressed="(subId === s.id).toString()"
+                      @click="escolherSub(s.id)" x-text="s.nome"></button>
+            </template>
+            <button type="button" class="pill pill--icone" x-show="!criando" @click="abrirCriacao()"
+                    :aria-label="`Criar subcategoria em ${macroSelecionada?.nome ?? ''}`">
+              <i class="ti ti-plus" aria-hidden="true"></i>
+            </button>
+          </div>
+
+          <div class="criar-sub" x-show="criando">
+            <input type="text" class="campo" x-ref="novoNome" x-model="nomeNovo" maxlength="50"
+                   :aria-label="`Nome da nova subcategoria em ${macroSelecionada?.nome ?? ''}`"
+                   placeholder="Nome da subcategoria"
+                   @keydown.enter.prevent="criarSub()" @keydown.escape.prevent="fecharCriacao()">
+            <button type="button" class="botao-secundario" :disabled="criandoEnviando" @click="criarSub()">
+              Criar e usar
+            </button>
+            <button type="button" class="botao-link" x-show="subcategorias.length > 0" @click="fecharCriacao()">
+              Cancelar
+            </button>
+          </div>
+          <p class="erro-campo" role="alert" x-show="erroCriar" x-text="erroCriar"></p>
+          <p class="texto-secundario texto-pequeno" aria-live="polite" x-text="mensagemSub"></p>
+        </fieldset>
+
+        <fieldset class="registrar__grupo">
+          <legend>Data</legend>
+          <div class="pills">
+            <button type="button" class="pill" :aria-pressed="(opcaoData === 'hoje').toString()"
+                    @click="escolherData('hoje')">Hoje</button>
+            <button type="button" class="pill" :aria-pressed="(opcaoData === 'ontem').toString()"
+                    @click="escolherData('ontem')">Ontem</button>
+            <button type="button" class="pill" :aria-pressed="(opcaoData === 'outra').toString()"
+                    @click="escolherData('outra')">Outra data</button>
+          </div>
+          <input type="date" class="campo" x-ref="dataOutra" x-show="opcaoData === 'outra'"
+                 aria-label="Data do gasto" x-model="dataOutra" :min="minimoIso" :max="hojeIso">
+        </fieldset>
+
+        <label class="registrar__campo">
+          <span>Descrição <span class="texto-secundario">(opcional)</span></span>
+          <input type="text" class="campo" x-model="descricao" maxlength="200" autocomplete="off"
+                 :placeholder="subSelecionada ? subSelecionada.nome : 'Usa o nome da subcategoria'">
+        </label>
+
+        <button type="button" class="pill pill--texto" x-show="!mostrarNota"
+                @click="abrirNota()">
+          <i class="ti ti-note" aria-hidden="true"></i> Adicionar nota
+        </button>
+        <label class="registrar__campo" x-show="mostrarNota">
+          <span>Nota <span class="texto-secundario">(opcional)</span></span>
+          <textarea class="campo" x-ref="nota" x-model="nota" maxlength="500" rows="2"></textarea>
+        </label>
+
+        <p class="erro-campo" role="alert" x-show="erro" x-text="erro"></p>
+
+        <button type="submit" class="botao-primario" :disabled="!podeSalvar"
+                aria-describedby="registrar-falta" x-text="enviando ? 'Salvando…' : 'Salvar gasto'"></button>
+        <p id="registrar-falta" class="texto-secundario texto-pequeno registrar__falta" x-text="faltando"></p>
+      </form>
     </section>
 
     <section class="tela" x-data="historico" x-show="$store.app.telaAtiva === 'historico'" x-cloak>
@@ -182,6 +276,18 @@
       <h1>Importar - em construção</h1>
     </section>
   </main>
+
+  <!-- Aviso global (ex.: "Gasto salvo · Desfazer"). A região aria-live fica
+       sempre no DOM para o leitor de tela anunciar quando o texto aparecer. -->
+  <div class="aviso-regiao" role="status" aria-live="polite">
+    <template x-if="$store.app.aviso">
+      <div class="aviso">
+        <span x-text="$store.app.aviso.texto"></span>
+        <button type="button" class="aviso__acao" x-show="$store.app.aviso.lancamentoId"
+                :disabled="$store.app.desfazendo" @click="$store.app.desfazerAviso()">Desfazer</button>
+      </div>
+    </template>
+  </div>
 
   <nav class="barra-inferior" aria-label="Navegação principal">
     <button type="button" class="barra-inferior__item" aria-label="Dashboard"

@@ -19,6 +19,14 @@
       return `${dia}/${mes}`;
     },
 
+    // Date -> "2026-11-03" no fuso LOCAL. toISOString() converteria para UTC
+    // e, depois das 21h em Brasília, devolveria o dia seguinte.
+    dataIso: (data) => [
+      data.getFullYear(),
+      String(data.getMonth() + 1).padStart(2, '0'),
+      String(data.getDate()).padStart(2, '0'),
+    ].join('-'),
+
     // (11, 2026) -> "Novembro 2026". new Date(ano, mes - 1, 1) usa o fuso local.
     mes: (mes, ano) => {
       const nome = NOME_DO_MES.format(new Date(ano, mes - 1, 1));

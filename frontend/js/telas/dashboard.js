@@ -49,6 +49,10 @@ document.addEventListener('alpine:init', () => {
         // Escondido, não busca: recarrega quando voltar a ficar visível
         if (this.$store.app.telaAtiva === 'dashboard') this.carregar();
       });
+      // Lançamento alterado em outro lugar (ex.: Desfazer do aviso)
+      this.$watch('$store.app.revisao', () => {
+        if (this.$store.app.telaAtiva === 'dashboard') this.carregar();
+      });
       if (this.$store.app.telaAtiva === 'dashboard') this.carregar();
     },
 
