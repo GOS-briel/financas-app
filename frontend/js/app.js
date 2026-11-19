@@ -28,6 +28,9 @@ document.addEventListener('alpine:init', () => {
     // "Salvar e continuar · Descartar" (sem confirm() do navegador).
     alteracoesNaoSalvas: () => 0,
     navegacaoPendente: null, // { tipo: 'tela', nome } | { tipo: 'mes', mes, ano }
+    // Lançamento (formato do GET /lancamentos) aberto no Registrar em modo
+    // edição (ADR-030); null = Registrar no modo "novo gasto"
+    lancamentoEmEdicao: null,
 
     // O Alpine chama init() do store automaticamente, logo após registrá-lo
     init() {
@@ -44,7 +47,20 @@ document.addEventListener('alpine:init', () => {
         return;
       }
       this.navegacaoPendente = null;
+      // Saiu do Registrar: a edição acabou (salva ou abandonada)
+      if (nome !== 'registrar') this.lancamentoEmEdicao = null;
       this.telaAtiva = nome;
+    },
+
+    // Botão + : sempre um gasto novo, mesmo no meio de uma edição
+    novoGasto() {
+      this.mostrarTela('registrar');
+      if (this.telaAtiva === 'registrar') this.lancamentoEmEdicao = null;
+    },
+
+    editarLancamento(lancamento) {
+      this.mostrarTela('registrar');
+      if (this.telaAtiva === 'registrar') this.lancamentoEmEdicao = lancamento;
     },
 
     // Depois de "Salvar e continuar" (sem falhas) ou "Descartar"

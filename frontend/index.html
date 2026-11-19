@@ -176,7 +176,9 @@
     </section>
 
     <section class="tela" x-data="registrar" x-show="$store.app.telaAtiva === 'registrar'" x-cloak>
-      <h1>Registrar gasto</h1>
+      <h1 x-text="modoEdicao ? 'Editar gasto' : 'Registrar gasto'">Registrar gasto</h1>
+      <!-- Importado (ADR-016): só categoria e nota mudam -->
+      <p class="cartao aviso-importado" x-show="importado">Veio da fatura: só categoria e nota podem mudar</p>
 
       <!-- Sem categorias não dá para salvar: carregando ou erro (ADR-027 D) -->
       <p class="texto-secundario" x-show="semCategorias && $store.app.carregando">Carregando categorias…</p>
@@ -191,7 +193,7 @@
         <!-- Valor: máscara de centavos só pelo evento input (ADR-028) -->
         <label for="registrar-valor" class="oculto-visualmente">Valor</label>
         <input id="registrar-valor" x-ref="valor" class="campo-valor numero" type="text"
-               inputmode="numeric" autocomplete="off" placeholder="R$ 0,00"
+               inputmode="numeric" autocomplete="off" placeholder="R$ 0,00" :disabled="importado"
                @input="aoDigitarValor($event)" @focus="cursorNoFim()" @click="cursorNoFim()">
 
         <fieldset class="registrar__grupo" x-show="!semCategorias">
@@ -236,7 +238,12 @@
           <p class="texto-secundario texto-pequeno" aria-live="polite" x-text="mensagemSub"></p>
         </fieldset>
 
-        <fieldset class="registrar__grupo">
+        <div class="registrar__grupo" x-show="importado">
+          <span class="registrar__rotulo">Data</span>
+          <p class="numero" x-text="`${dataOriginalTexto} (data da fatura)`"></p>
+        </div>
+
+        <fieldset class="registrar__grupo" x-show="!importado">
           <legend>Data</legend>
           <div class="pills">
             <button type="button" class="pill" :aria-pressed="(opcaoData === 'hoje').toString()"
@@ -248,11 +255,14 @@
           </div>
           <input type="date" class="campo" x-ref="dataOutra" x-show="opcaoData === 'outra'"
                  aria-label="Data do gasto" x-model="dataOutra" :min="minimoIso" :max="hojeIso">
+          <p class="texto-secundario texto-pequeno" x-show="dataOriginalAntiga">
+            Data original fora dos últimos 90 dias: dá para mantê-la ou trocar por uma recente.
+          </p>
         </fieldset>
 
         <label class="registrar__campo">
           <span>Descrição <span class="texto-secundario">(opcional)</span></span>
-          <input type="text" class="campo" x-model="descricao" maxlength="200" autocomplete="off"
+          <input type="text" class="campo" x-model="descricao" maxlength="200" autocomplete="off" :disabled="importado"
                  :placeholder="subSelecionada ? subSelecionada.nome : 'Usa o nome da subcategoria'">
         </label>
 
@@ -268,8 +278,10 @@
         <p class="erro-campo" role="alert" x-show="erro" x-text="erro"></p>
 
         <button type="submit" class="botao-primario" :disabled="!podeSalvar"
-                aria-describedby="registrar-falta" x-text="enviando ? 'Salvando…' : 'Salvar gasto'"></button>
+                aria-describedby="registrar-falta" x-text="textoSalvar"></button>
         <p id="registrar-falta" class="texto-secundario texto-pequeno registrar__falta" x-text="faltando"></p>
+        <button type="button" class="botao-link registrar__cancelar" x-show="modoEdicao" :disabled="enviando"
+                @click="cancelarEdicao()">Cancelar</button>
       </form>
     </section>
 
@@ -347,7 +359,96 @@
     </section>
 
     <section class="tela" x-data="historico" x-show="$store.app.telaAtiva === 'historico'" x-cloak>
-      <h1>Histórico - em construção</h1>
+      <!-- Mesmo mês do store que o Dashboard (ADR-030 A) -->
+      <header class="dash-cabecalho">
+        <p class="texto-secundario">Histórico</p>
+        <div class="dash-mes">
+          <button type="button" class="botao-icone" aria-label="Mês anterior" @click="mesAnterior()">
+            <i class="ti ti-chevron-left" aria-hidden="true"></i>
+          </button>
+          <h1 x-text="rotuloMes" aria-live="polite"></h1>
+          <button type="button" class="botao-icone" aria-label="Próximo mês" @click="proximoMes()">
+            <i class="ti ti-chevron-right" aria-hidden="true"></i>
+          </button>
+        </div>
+      </header>
+
+      <div class="faixa-mes" x-show="posicaoMesExibido !== 0">
+        <span x-text="posicaoMesExibido < 0 ? 'Mês encerrado' : 'Mês futuro'"></span>
+        <button type="button" class="botao-link" @click="voltarParaHoje()">Voltar para hoje</button>
+      </div>
+
+      <p class="texto-secundario" x-show="primeiraCarga">Carregando…</p>
+      <div class="dash-erro" x-show="erro && !carregando">
+        <button type="button" class="botao-secundario" @click="carregar()">
+          <i class="ti ti-refresh" aria-hidden="true"></i> Tentar de novo
+        </button>
+      </div>
+
+      <template x-if="dashboard">
+        <div class="historico" :class="{ 'atualizando': atualizando }" :aria-busy="carregando">
+          <p class="historico__resumo numero" x-show="!mesVazio" x-text="resumo"></p>
+          <p class="dash-vazio" x-show="mesVazio">
+            Nenhum lançamento em <span x-text="rotuloMes"></span>.
+          </p>
+
+          <template x-for="g in grupos" :key="g.chave">
+            <section class="grupo">
+              <button type="button" class="grupo__cabecalho" :aria-expanded="aberto(g).toString()"
+                      @click="alternarGrupo(g)">
+                <span class="grupo__nome" x-text="g.nome"></span>
+                <span class="numero texto-secundario grupo__total" x-text="cabecalho(g)"></span>
+                <i class="ti" :class="aberto(g) ? 'ti-chevron-up' : 'ti-chevron-down'" aria-hidden="true"></i>
+              </button>
+
+              <ul class="lista-lancamentos" x-show="aberto(g)">
+                <template x-for="l in g.itens" :key="l.id">
+                  <li class="lancamento lancamento--historico" :data-id="l.id">
+                    <button type="button" class="lancamento__toggle" :aria-expanded="(itemAtivo === l.id).toString()"
+                            @click="alternarItem(l)">
+                      <span class="lancamento__texto">
+                        <span class="lancamento__descricao" x-text="l.descricao"></span>
+                        <span class="texto-secundario lancamento__detalhe" x-text="detalhe(l)"></span>
+                      </span>
+                      <span class="numero lancamento__valor" x-text="formatar.dinheiro(l.valor)"></span>
+                    </button>
+
+                    <!-- Sugestão do aprendizado (ADR-018/020) -->
+                    <div class="sugestao" x-show="l.subcategoria_sugerida">
+                      <span>Sugestão: <strong x-text="l.subcategoria_sugerida?.nome"></strong></span>
+                      <button type="button" class="botao-link" :disabled="ocupado === l.id" @click="aceitar(l)">Aceitar</button>
+                      <button type="button" class="botao-link" @click="editar(l)">Escolher</button>
+                    </div>
+
+                    <div class="lancamento__acoes" x-show="itemAtivo === l.id && confirmandoApagar !== l.id">
+                      <button type="button" class="botao-secundario" @click="editar(l)">
+                        <i class="ti ti-pencil" aria-hidden="true"></i> Editar
+                      </button>
+                      <button type="button" class="botao-secundario" @click="pedirApagar(l)">
+                        <i class="ti ti-trash" aria-hidden="true"></i> Apagar
+                      </button>
+                    </div>
+
+                    <div class="confirmar-apagar" role="group" aria-label="Confirmar exclusão"
+                         x-show="confirmandoApagar === l.id">
+                      <p>
+                        Apagar este gasto?
+                        <span x-show="l.origem === 'fatura'">Ele volta se você reimportar a fatura.</span>
+                      </p>
+                      <div class="confirmar-apagar__botoes">
+                        <button type="button" class="botao-perigo" :disabled="ocupado === l.id" @click="apagar(l)">Apagar</button>
+                        <button type="button" class="botao-link" @click="confirmandoApagar = null">Cancelar</button>
+                      </div>
+                    </div>
+
+                    <p class="erro-campo" role="alert" x-show="erroItem.id === l.id" x-text="erroItem.texto"></p>
+                  </li>
+                </template>
+              </ul>
+            </section>
+          </template>
+        </div>
+      </template>
     </section>
 
     <section class="tela" x-data="importar" x-show="$store.app.telaAtiva === 'importar'" x-cloak>
@@ -384,7 +485,7 @@
 
     <button type="button" class="barra-inferior__mais" aria-label="Registrar lançamento"
             :aria-current="$store.app.telaAtiva === 'registrar' ? 'page' : null"
-            @click="$store.app.mostrarTela('registrar')">
+            @click="$store.app.novoGasto()">
       <i class="ti ti-plus" aria-hidden="true"></i>
     </button>
 

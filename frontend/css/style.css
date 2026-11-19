@@ -570,6 +570,136 @@ body {
   flex: 1 1 180px;
 }
 
+/* ---------- Registrar: modo edição (ADR-030) ---------- */
+.aviso-importado {
+  background: var(--cor-borda);
+  font-size: 0.875rem;
+}
+
+.registrar__rotulo {
+  font-weight: 600;
+}
+
+.registrar__cancelar {
+  align-self: center;
+}
+
+.campo-valor:disabled,
+.campo:disabled {
+  color: var(--cor-texto-secundario);
+}
+
+/* ---------- Histórico ---------- */
+.historico {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-md);
+  transition: opacity 0.2s;
+}
+
+.historico.atualizando {
+  opacity: 0.45;
+}
+
+.historico__resumo {
+  font-weight: 600;
+}
+
+.grupo {
+  display: flex;
+  flex-direction: column;
+}
+
+.grupo__cabecalho {
+  display: flex;
+  align-items: center;
+  gap: var(--espaco-sm);
+  width: 100%;
+  padding: var(--espaco-sm) 0;
+  border-bottom: 2px solid var(--cor-primaria);
+  text-align: left;
+}
+
+.grupo__nome {
+  flex: 1;
+  font-weight: 600;
+}
+
+.grupo__total {
+  font-size: 0.875rem;
+}
+
+/* Item do histórico: linha clicável + ações/sugestão embaixo */
+.lancamento--historico {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--espaco-sm);
+}
+
+.lancamento__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--espaco-md);
+  width: 100%;
+  text-align: left;
+}
+
+.lancamento__toggle .lancamento__texto {
+  display: flex;
+  flex-direction: column;
+}
+
+.lancamento__detalhe {
+  font-size: 0.8125rem;
+}
+
+.sugestao {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--espaco-xs) var(--espaco-md);
+  padding: var(--espaco-xs) var(--espaco-sm);
+  border: 1px dashed var(--cor-texto-secundario);
+  border-radius: var(--raio);
+  font-size: 0.8125rem;
+}
+
+.lancamento__acoes,
+.confirmar-apagar__botoes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--espaco-sm) var(--espaco-md);
+}
+
+.confirmar-apagar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-sm);
+  padding: var(--espaco-sm) var(--espaco-md);
+  border-radius: var(--raio);
+  background: var(--cor-estado-estourado);
+  color: var(--cor-estado-estourado-texto);
+  font-size: 0.875rem;
+}
+
+.confirmar-apagar .botao-link {
+  color: inherit;
+}
+
+.botao-perigo {
+  padding: var(--espaco-xs) var(--espaco-md);
+  border-radius: var(--raio);
+  background: var(--cor-estado-estourado-texto);
+  color: var(--cor-fundo);
+  font-weight: 600;
+}
+
+.botao-perigo:disabled {
+  opacity: 0.5;
+}
+
 /* ---------- Tetos ---------- */
 .faixa-pendente {
   display: flex;

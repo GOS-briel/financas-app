@@ -27,7 +27,12 @@ CENÁRIOS (relativos ao mês de hoje)
     Saúde        teto R$ 0 sem gasto (folgado, 0%)
     Transporte   gasto sem teto
     Outros       sem gasto e sem teto (recolhida)
-    Sem categoria  3 lançamentos para categorizar
+    Sem categoria  3 lançamentos para categorizar; "LOJA ONLINE MARKETPLACE"
+                   com sugestão (aprendizado semeado -> Roupas)
+- Mês RETRASADO: alguns lançamentos para o Histórico (critério 4), entre eles
+  "APP DE TRANSPORTE" sem categoria, igual ao do mês anterior: categorizar um
+  deles (importado, ensina) faz a sugestão aparecer no outro. Só lançamentos:
+  os números do mês anterior não mudam (ADR-027).
 - Mês ATUAL: vazio, herdando os tetos -> "R$ 0,00 de R$ Y" e "Nenhum gasto".
 
 Não é coletado pelo pytest (testpaths = ["tests"]) nem entra na cobertura
@@ -47,7 +52,7 @@ RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ / "backend"))
 
 import main  # noqa: E402  (precisa do backend no sys.path)
-from app.db import inicializar  # noqa: E402
+from app.db import aprendizados, inicializar  # noqa: E402
 
 BANCO_REAL = (RAIZ / "backend" / "app" / "db" / "financas.db").resolve()
 
@@ -91,12 +96,33 @@ def semear(conexao: sqlite3.Connection, hoje: date) -> dict:
         (dia(1), "LOJA ONLINE MARKETPLACE", 57.80, None, "fatura", None, None),
         (dia(22), "Presente de aniversário", 75.00, None, "manual", None, None),
     ]
-    for data, descricao, valor, subcategoria, origem, p_atual, p_total in lancamentos:
-        conexao.execute(
-            "INSERT INTO lancamentos (data, descricao, valor, subcategoria_id, parcela_atual, "
-            "parcela_total, origem, nota, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)",
-            (data, descricao, valor, sub.get(subcategoria), p_atual, p_total, origem, criado),
-        )
+    # Mês retrasado: só para o Histórico; não mexe nos números do mês anterior
+    dia2 = lambda d: f"{ano_retrasado:04d}-{mes_retrasado:02d}-{d:02d}"  # noqa: E731
+    criado2 = f"{ano_retrasado:04d}-{mes_retrasado:02d}-28T12:00:00"
+    lancamentos_retrasado = [
+        (dia2(1), "SUPERMERCADO BOM PRECO", 251.30, "Mercado", "fatura", None, None),
+        (dia2(1), "APP DE TRANSPORTE", 24.90, None, "fatura", None, None),
+        (dia2(1), "LOJA DE ESPORTES CENTRO - Parcela 1/4", 49.90, "Equipamento", "fatura", 1, 4),
+        (dia2(8), "Padaria do bairro", 18.50, "Mercado", "manual", None, None),
+        (dia2(15), "Cinema Centro", 38.00, "Cinema", "manual", None, None),
+        (dia2(21), "Farmácia Saúde", 42.70, "Farmácia", "manual", None, None),
+    ]
+
+    for lista, criado_em in ((lancamentos, criado), (lancamentos_retrasado, criado2)):
+        for data, descricao, valor, subcategoria, origem, p_atual, p_total in lista:
+            conexao.execute(
+                "INSERT INTO lancamentos (data, descricao, valor, subcategoria_id, parcela_atual, "
+                "parcela_total, origem, nota, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+                (data, descricao, valor, sub.get(subcategoria), p_atual, p_total, origem, criado_em),
+            )
+
+    # Aprendizado para "LOJA ONLINE MARKETPLACE" (mês anterior, sem categoria)
+    # aparecer com sugestão. Padrão gerado pela mesma função do backend (ADR-019).
+    conexao.execute(
+        "INSERT INTO aprendizados (padrao_descricao, subcategoria_id, confianca, criado_em, "
+        "atualizado_em) VALUES (?, ?, 1, ?, ?)",
+        (aprendizados.normalizar_padrao("LOJA ONLINE MARKETPLACE"), sub["Roupas"], criado, criado),
+    )
 
     # (macro, mes, ano, valor)
     tetos = [
@@ -108,7 +134,8 @@ def semear(conexao: sqlite3.Connection, hoje: date) -> dict:
         (2, mes_retrasado, ano_retrasado, 150.00),  # Lazer: herdado no mês anterior
     ]
     conexao.executemany("INSERT INTO tetos (categoria_macro_id, mes, ano, valor) VALUES (?, ?, ?, ?)", tetos)
-    return {"mes": mes, "ano": ano, "lancamentos": len(lancamentos), "tetos": len(tetos)}
+    return {"mes": mes, "ano": ano, "lancamentos": len(lancamentos) + len(lancamentos_retrasado),
+            "tetos": len(tetos)}
 
 
 def porta_ocupada(porta: int) -> bool:
@@ -143,8 +170,9 @@ def main_demo() -> None:
             resumo = semear(conexao, date.today())
         conexao.close()
         print(f"\nBanco de DEMONSTRAÇÃO: {banco}")
-        print(f"Mês com dados: {resumo['mes']:02d}/{resumo['ano']} "
-              f"({resumo['lancamentos']} lançamentos, {resumo['tetos']} tetos). Mês atual: vazio.")
+        print(f"Mês principal: {resumo['mes']:02d}/{resumo['ano']} (mais alguns lançamentos no "
+              f"retrasado; {resumo['lancamentos']} lançamentos e {resumo['tetos']} tetos no total). "
+              f"Mês atual: vazio.")
         print(f"API em http://127.0.0.1:{porta} — Ctrl+C para parar e apagar o banco.\n")
         # Sem debug/reloader: o reloader reiniciaria o processo sem a troca do banco
         main.app.run(port=porta, debug=False, use_reloader=False)

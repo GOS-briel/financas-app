@@ -1416,6 +1416,93 @@ Critério 5 da v1: editar o teto de uma categoria. Feita antes da 12.5 porque, s
 
 ---
 
+## ADR-030 — Histórico: agrupamento por macro, edição reaproveitando o Registrar e aprendizado só em importados
+
+**Data:** 2026-11-19 (decisões e implementação, 12.5)
+**Status:** Decidido
+
+### Contexto
+
+Critério 4 da v1: voltar 2 meses no histórico e ver uma categoria. O backend já entrega tudo: `GET /lancamentos` (data desc, com `subcategoria_sugerida`, ADR-018), `PUT` que só aplica o que mudou e trava data/descrição/valor de importados (ADR-016), `POST /lancamentos/<id>/categorizar` que categoriza e ensina (ADRs 017, 019 e 020), `DELETE` definitivo, e os totais por macro no `/dashboard` (ADR-021). Etapa de frontend; os desvios fora dela estão na seção própria abaixo.
+
+### Decisões
+
+**A. Lista agrupada por macro, com os números do backend**
+- Mês do store, com chevrons e a faixa "Mês encerrado/futuro", como no Dashboard e nos Tetos.
+- **Os grupos são as categorias do `/dashboard`** com `quantidade > 0`: nome, quantidade e total vêm de lá, sem soma no frontend. Ordenar pelo `gasto` (maior primeiro, empate na ordem do backend) é só exibição. "Sem categoria" fica sempre por último.
+- As 2 maiores ficam abertas, o resto recolhido; "Sem categoria" fica aberta quando tem itens. Ao trocar de mês, volta ao padrão; na mesma visita, o que o usuário abriu ou fechou é mantido.
+- Os itens são distribuídos por `categoria_macro_id`, na ordem da API (data desc). Cabeçalho do grupo: "nome · quantidade · total". Topo: "N lançamentos · R$ total" (`hero.total_gasto`; N é o tamanho da lista).
+- Cada item mostra descrição, valor e "data curta · subcategoria · origem (manual/fatura)". Tocar revela "Editar · Apagar" (um item por vez). Ao voltar para a tela, as ações ficam fechadas.
+- Estados: primeira carga, atualização, erro com "Tentar de novo", e mês vazio ("Nenhum lançamento em <mês>.").
+- **Toda mudança recarrega a lista e o `/dashboard` juntos** (o Histórico observa `revisao`): depois de Aceitar ou Apagar, "Sem categoria", os grupos e o topo já refletem a mudança.
+
+**B. Edição reaproveitando o Registrar**
+- O store guarda `lancamentoEmEdicao` (o objeto do GET). `editarLancamento(l)` preenche e abre o Registrar; o botão + chama `novoGasto()`, que limpa a edição, inclusive no meio de uma. Sair do Registrar também limpa.
+- O Registrar observa a chave `tela|idEmEdição` e, ao abrir, **preenche** (edição) ou **limpa** (novo), com a mesma máscara (ADR-028/029), grade, criação de subcategoria e regras de "o que falta".
+- O `salvar()` só escolhe o caminho: **`criar()` é o código da 12.4, intacto**, e **`atualizar()` é novo**. Os 51 testes da 12.4 seguem passando sem mudança.
+- Edição: título "Editar gasto", "Salvar alterações", "Cancelar" (volta ao Histórico) e foco no valor só em manual. Manda só o que mudou; se nada mudou, volta sem requisição.
+- **Importado (ADR-016):** valor, descrição e data travados (data mostrada como texto, "data da fatura"), com "Veio da fatura: só categoria e nota podem mudar". A regra "valor > 0" não se aplica.
+- Ao salvar, volta ao Histórico no mesmo mês, com o aviso "Gasto atualizado", sem Desfazer.
+
+**C. Aprendizado só em importados; Aceitar sempre ensina**
+- **Importado** com subcategoria trocada: `POST categorizar` (ensina, ADR-019).
+- **Manual:** um único `PUT` com o que mudou; a subcategoria vai em silêncio (ADR-017).
+- **Sugestão** (itens sem categoria com `subcategoria_sugerida`): "Sugestão: <sub>" com **Aceitar** (`POST categorizar`, sempre ensina, também em manual) e **Escolher** (abre a edição).
+
+**D. Importado com subcategoria e nota alteradas: categorizar antes da nota**
+- `categorizar` só aceita `subcategoria_id`, então a nota vai num `PUT` separado. Ordem: **primeiro o categorizar** (a ação principal, a que ensina), **depois o PUT da nota**.
+- Se o categorizar falhar, o PUT nem é enviado; o erro fica na tela.
+- Se **a nota falhar**: a categoria já salva vira a base local, o usuário continua na tela com "Categoria salva, mas a nota não: <motivo>. Toque em Salvar de novo.", e o novo Salvar **manda só a nota** (o categorizar não se repete).
+
+**E. Data na edição de um manual**
+- A pill marcada é a da data original (Hoje, Ontem, ou "Outra data" com o input preenchido).
+- **A janela de 90 dias só vale se a data mudar** (ADR-015/016): a data original é sempre aceita, mesmo fora da janela. O input mantém `min` = hoje − 90 e `max` = hoje; com a original fora da janela, aparece a dica "dá para mantê-la ou trocar por uma recente".
+- A data só é enviada se mudou.
+- Se a data mudar de mês, a tela fica no mês exibido (o item some da lista) e o aviso diz "Gasto atualizado · agora em <Mês Ano>".
+
+**F. Apagar com confirmação inline**
+- "Apagar este gasto? Apagar · Cancelar" dentro do item, sem `confirm()`. Num importado, acrescenta "Ele volta se você reimportar a fatura." (ADR-016 × ADR-010).
+- Depois de apagar: `revisao++`, e a lista e os totais recarregam.
+
+### Justificativa
+
+1. Números do `/dashboard`: o Histórico nunca diverge do Dashboard, e a regra "o frontend exibe, não recalcula" continua valendo.
+2. Grupos pelo gasto, com os 2 maiores abertos: "ver uma categoria" (critério 4) é um toque, sem rolar por tudo.
+3. Um só formulário para criar e editar: mesma máscara, grade e validação, sem duplicar código nem divergir.
+4. Aprender só de importados mantém o dicionário limpo (ADR-017): descrições manuais são livres, e uma correção pontual não deve ensinar errado. Aceitar uma sugestão é uma confirmação explícita, por isso sempre ensina.
+5. Categorizar antes da nota: se só uma das duas der certo, que seja a que ensina e muda os totais.
+
+### Validação (12.5)
+
+- **Headless (Edge, tempo real, demo na 5001):** 51 verificações do Histórico, todas OK em duas rodadas com banco limpo. Inclui critério 4, ordem e abertura dos grupos, totais depois de Aceitar e de Apagar, sugestão aparecendo no outro item igual, importado travado com falha simulada da nota (categorizar uma vez só), manual "nada mudou" sem requisição, mudança de mês, data antiga simulada e + no meio da edição.
+- **Mês passado do demo intacto**, conferido pela API: hero R$ 963,45 de R$ 1.350,00, total R$ 1.314,95.
+- **Regressões:** 12.4 (51/51) e 12.7 (46/46).
+- **Navegador (Gabriel):** roteiro completo OK com `servidor_frontend.py` e o demo, inclusive largura de celular.
+- **Backend inalterado:** 338 testes passando.
+
+### Desvios aprovados fora do frontend
+
+- **Semente do `scripts/demo_dashboard.py`:** 6 lançamentos no **mês retrasado** (o critério 4 caía num mês vazio), entre eles "APP DE TRANSPORTE" sem categoria, igual ao do mês passado; e um aprendizado para "LOJA ONLINE MARKETPLACE" → Roupas, com o padrão gerado por **`normalizar_padrao()` do backend**, não escrito à mão. O mês passado não mudou (os números citados na ADR-027 continuam valendo).
+- **`scripts/servidor_frontend.py`:** o `python -m http.server` não manda `Cache-Control`, e o Chrome reaproveitou o `historico.js` antigo (placeholder da 12.2) com o `index.html` novo: tela em branco e `rotuloMes is not defined` no console. O script novo serve `frontend/` com **`Cache-Control: no-store`**, recusa porta ocupada (como o demo) e escuta em 127.0.0.1. Passa a ser o comando oficial do "Como rodar" no `CLAUDE.md`, com a armadilha registrada.
+
+### Trade-offs aceitos
+
+- **Sem descategorizar** pela edição: a subcategoria é obrigatória também ao editar (ADR-028).
+- **Aviso de mudança de mês sem atalho** para o mês novo: o aviso só tem a ação Desfazer.
+- **Sem Desfazer na edição nem no apagar:** a confirmação inline é a proteção (ADR-016).
+- Corrigir um manual não ensina; para ensinar a partir de um manual, só aceitando uma sugestão.
+- Duas requisições por carga (`/lancamentos` e `/dashboard`).
+
+### Reabrir se:
+
+- Ensinar a partir de manuais fizer falta: opção "lembrar para os próximos" no modo edição.
+- O aviso "agora em <mês>" pedir atalho: generalizar o aviso com uma ação "Ver".
+- Apagar por engano acontecer na prática: Desfazer com recriação do lançamento ou soft delete (ADR-016).
+- O volume do mês deixar a lista longa: filtro por origem ou busca (a API já filtra por origem).
+- Hospedar o frontend: cache com versão nos arquivos (o `no-store` é só para desenvolvimento).
+
+---
+
 ## Convenções deste arquivo
 
 - Decisões reabertas viram ADR-NNN-v2 com link pra versão anterior.
