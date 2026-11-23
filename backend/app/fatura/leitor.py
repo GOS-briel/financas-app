@@ -6,12 +6,13 @@
 # Parcelas são identificadas, mas a data e o valor continuam sendo os
 # do mês da fatura (ADR-002). Transações internacionais: ver ADR-003.
 #
-# Também lê o cabeçalho da 1ª página: a competência (mês/ano do
-# vencimento, ADR-009) e o total oficial da fatura, usado para conferir
-# a soma dos lançamentos.
+# Também lê o cabeçalho da 1ª página: a data de vencimento (completa,
+# ADR-031; o mês/ano dela é a competência, ADR-009) e o total oficial da
+# fatura, usado para conferir a soma dos lançamentos.
 
 import re
 import sys
+from datetime import date
 
 import pdfplumber
 
@@ -56,17 +57,32 @@ def _texto_primeira_pagina(pdf_path: str) -> str:
         return pdf.pages[0].extract_text() or ""
 
 
+def _vencimento_do_texto(texto: str) -> str | None:
+    """"... Vencimento ...\\nR$ 1.699,21 10/10/2026 ..." -> "2026-10-10"; data impossível -> None."""
+    achado = RE_VENCIMENTO.search(texto)
+    if achado is None:
+        return None
+    dia, mes, ano = int(achado.group(1)), int(achado.group(2)), int(achado.group(3))
+    try:
+        return date(ano, mes, dia).isoformat()
+    except ValueError:  # ex: 31/02 ou mês 13
+        return None
+
+
+def extrair_vencimento(pdf_path: str) -> str | None:
+    """Data de vencimento do cabeçalho em "AAAA-MM-DD" (ADR-031), ou None se não encontrar."""
+    return _vencimento_do_texto(_texto_primeira_pagina(pdf_path))
+
+
 def extrair_competencia(pdf_path: str) -> dict | None:
     """
     Retorna {"mes": int, "ano": int} a partir da data de vencimento
     (ADR-009), ou None se não encontrar.
     """
-    achado = RE_VENCIMENTO.search(_texto_primeira_pagina(pdf_path))
-    if achado is None:
+    vencimento = extrair_vencimento(pdf_path)
+    if vencimento is None:
         return None
-    mes, ano = int(achado.group(2)), int(achado.group(3))
-    if not 1 <= mes <= 12:
-        return None
+    ano, mes, _ = (int(parte) for parte in vencimento.split("-"))
     return {"mes": mes, "ano": ano}
 
 
@@ -121,6 +137,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     lancamentos = extrair_lancamentos(sys.argv[1])
+    print(f"Vencimento: {extrair_vencimento(sys.argv[1])}")
     print(f"Competência: {extrair_competencia(sys.argv[1])}")
     print(f"Total no cabeçalho: {extrair_total_fatura(sys.argv[1])}")
 

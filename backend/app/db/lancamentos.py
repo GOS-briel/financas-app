@@ -54,7 +54,8 @@ SQL_INSERIR = """
 """
 
 
-def salvar_lancamentos_fatura(lancamentos: list[dict], mes: int, ano: int) -> list[dict]:
+def salvar_lancamentos_fatura(lancamentos: list[dict], mes: int, ano: int,
+                              gravar: bool = True) -> list[dict]:
     """
     Grava os lançamentos da fatura com data AAAA-MM-01 (ADR-007).
 
@@ -63,9 +64,15 @@ def salvar_lancamentos_fatura(lancamentos: list[dict], mes: int, ano: int) -> li
     iguais legítimos (ex: dois cafés de mesmo valor no mês) entram os dois,
     e reimportar a mesma fatura não duplica nada.
 
+    gravar=False é a prévia (ADR-031): o MESMO laço decide o status, só o
+    INSERT não é executado. Dá o mesmo resultado da importação real porque
+    m é contado uma vez por chave ANTES de qualquer insert dessa chave, e o
+    status depende só de m e do contador do PDF, nunca dos inserts. Sem
+    nenhum SQL de escrita, "nada gravado" é garantido pela estrutura.
+
     Tudo numa transação só: se der erro, nada é gravado.
     Retorna os lançamentos com a data gravada e "status"
-    ("inserido" ou "ignorado_duplicata").
+    ("inserido" ou "ignorado_duplicata"; na prévia, o que aconteceria).
     """
     data = f"{ano:04d}-{mes:02d}-01"
     criado_em = datetime.now().isoformat(timespec="seconds")
@@ -90,11 +97,12 @@ def salvar_lancamentos_fatura(lancamentos: list[dict], mes: int, ano: int) -> li
                 vistos_no_pdf[chave] += 1
 
                 if vistos_no_pdf[chave] > ja_no_banco[chave]:
-                    conexao.execute(
-                        SQL_INSERIR,
-                        (data, item["descricao"], item["valor"],
-                         item["parcela_atual"], item["parcela_total"], criado_em),
-                    )
+                    if gravar:
+                        conexao.execute(
+                            SQL_INSERIR,
+                            (data, item["descricao"], item["valor"],
+                             item["parcela_atual"], item["parcela_total"], criado_em),
+                        )
                     status = "inserido"
                 else:
                     status = "ignorado_duplicata"

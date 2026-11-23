@@ -6,12 +6,13 @@ from datetime import date, timedelta
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from app.db import categorias, dashboard, inicializar, lancamentos, tetos
 from app.fatura.leitor import (
-    extrair_competencia,
     extrair_lancamentos,
     extrair_total_fatura,
+    extrair_vencimento,
 )
 
 # Origens de desenvolvimento do frontend — ADR-025
@@ -22,9 +23,22 @@ ORIGENS_PERMITIDAS = [
     "http://127.0.0.1:8000",
 ]
 
+# Limite do corpo da requisição (ADR-031): a fatura real tem ~200 KB; 5 MB dá
+# folga para faturas longas. Acima disso o Werkzeug levanta 413 ao ler o
+# upload, ANTES de qualquer PDF temporário ser criado.
+TAMANHO_MAXIMO_UPLOAD_MB = 5
+
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = TAMANHO_MAXIMO_UPLOAD_MB * 1024 * 1024
 # always_send=False: sem isso, requisição sem Origin receberia a 1ª origem da lista
 CORS(app, resources={r"/*": {"origins": ORIGENS_PERMITIDAS}}, always_send=False)
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def upload_grande_demais(_erro):
+    """413 em JSON, como o resto da API (o padrão do Flask é HTML).
+    Passa pelo after_request, então sai com o cabeçalho CORS (ADR-025)."""
+    return jsonify({"erro": f"arquivo maior que o limite de {TAMANHO_MAXIMO_UPLOAD_MB} MB"}), 413
 
 
 @app.before_request
@@ -87,6 +101,14 @@ def _competencia_do_formulario() -> dict | None:
     return {"mes": mes, "ano": ano, "fonte": "formulario"}
 
 
+def _simular_do_formulario() -> bool:
+    """Campo opcional "simular": "true" ou "false" (padrão false)."""
+    valor = request.form.get("simular", "false")
+    if valor not in ("true", "false"):
+        raise ValueError("simular deve ser 'true' ou 'false'")
+    return valor == "true"
+
+
 @app.route("/fatura/importar", methods=["POST"])
 def importar_fatura():
     arquivo = request.files.get("arquivo")
@@ -98,6 +120,10 @@ def importar_fatura():
         competencia_formulario = _competencia_do_formulario()
     except ValueError:
         return jsonify({"erro": "mes/ano invalidos"}), 400
+    try:
+        simular = _simular_do_formulario()
+    except ValueError as erro:
+        return jsonify({"erro": str(erro)}), 400
 
     # mkstemp em vez de NamedTemporaryFile: no Windows o arquivo aberto
     # pelo NamedTemporaryFile não pode ser reaberto pelo pdfplumber
@@ -106,7 +132,7 @@ def importar_fatura():
     try:
         arquivo.save(caminho)
         extraidos = extrair_lancamentos(caminho)
-        competencia_pdf = extrair_competencia(caminho)
+        vencimento = extrair_vencimento(caminho)  # "AAAA-MM-DD" ou None
         total_fatura = extrair_total_fatura(caminho)
     except Exception:
         app.logger.exception("Falha ao processar fatura")
@@ -114,11 +140,13 @@ def importar_fatura():
     finally:
         os.remove(caminho)
 
-    # Formulário tem prioridade sobre o detectado no PDF (ADR-009)
+    # Formulário tem prioridade sobre o detectado no PDF (ADR-009). O
+    # vencimento do PDF vai junto nos dois casos, para a tela mostrar (ADR-031)
     if competencia_formulario is not None:
-        competencia = competencia_formulario
-    elif competencia_pdf is not None:
-        competencia = {**competencia_pdf, "fonte": "pdf"}
+        competencia = {**competencia_formulario, "vencimento": vencimento}
+    elif vencimento is not None:
+        ano, mes, _ = (int(parte) for parte in vencimento.split("-"))
+        competencia = {"mes": mes, "ano": ano, "fonte": "pdf", "vencimento": vencimento}
     else:
         return jsonify({
             "erro": "nao foi possivel detectar o mes/ano",
@@ -126,8 +154,9 @@ def importar_fatura():
         }), 422
 
     try:
+        # Prévia (simular): mesma regra de deduplicação, sem gravar (ADR-031)
         salvos = lancamentos.salvar_lancamentos_fatura(
-            extraidos, competencia["mes"], competencia["ano"]
+            extraidos, competencia["mes"], competencia["ano"], gravar=not simular
         )
     except Exception:
         app.logger.exception("Falha ao salvar lancamentos no banco")
@@ -136,6 +165,7 @@ def importar_fatura():
     inseridos = sum(1 for item in salvos if item["status"] == "inserido")
     total_despesas = round(sum(item["valor"] for item in salvos), 2)
     return jsonify({
+        "simulado": simular,
         "competencia": competencia,
         "quantidade_total": len(salvos),
         "inseridos": inseridos,

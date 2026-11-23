@@ -1,9 +1,12 @@
-# POST /fatura/importar sem o PDF real: o parser é simulado (Etapas 4 e 5.3, ADR-009/010)
+# POST /fatura/importar sem o PDF real: o parser é simulado (Etapas 4 e 5.3, ADR-009/010;
+# prévia, limite de upload e vencimento completo na 12.6a, ADR-031)
 import io
 
 import pytest
 
 import main
+
+CONTAR = "SELECT COUNT(*) FROM lancamentos"
 
 EXTRAIDOS = [
     {"data": "08/05", "descricao": "LOJA A - Parcela 5/6", "valor": 66.66, "parcela_atual": 5, "parcela_total": 6},
@@ -16,7 +19,7 @@ def parser_simulado(mocker):
     """Substitui as 3 funções do parser no main; devolve os mocks para ajustar por teste."""
     return {
         "lancamentos": mocker.patch.object(main, "extrair_lancamentos", return_value=EXTRAIDOS),
-        "competencia": mocker.patch.object(main, "extrair_competencia", return_value={"mes": 10, "ano": 2026}),
+        "vencimento": mocker.patch.object(main, "extrair_vencimento", return_value="2026-10-10"),
         "total": mocker.patch.object(main, "extrair_total_fatura", return_value=100.0),
     }
 
@@ -58,16 +61,32 @@ def test_arquivo_que_nao_e_pdf_de_verdade_retorna_500_e_limpa_o_temporario(clien
 
 # Competência --------------------------------------------------------------------
 def test_competencia_do_pdf(cliente_flask, parser_simulado):
-    """Sem mes/ano no formulário, usa o detectado no PDF, com fonte 'pdf' e data AAAA-MM-01."""
+    """Sem mes/ano no formulário, usa o mês/ano do vencimento do PDF (fonte 'pdf'), com o
+    vencimento completo (ADR-031); a gravação continua em AAAA-MM-01 (ADR-007)."""
     corpo = _enviar(cliente_flask).get_json()
-    assert corpo["competencia"] == {"mes": 10, "ano": 2026, "fonte": "pdf"}
+    assert corpo["competencia"] == {"mes": 10, "ano": 2026, "fonte": "pdf", "vencimento": "2026-10-10"}
     assert {item["data"] for item in corpo["lancamentos"]} == {"2026-10-01"}
 
 
 def test_formulario_tem_prioridade_sobre_o_pdf(cliente_flask, parser_simulado):
-    """mes/ano do formulário vencem o PDF (fonte 'formulario')."""
+    """mes/ano do formulário vencem o PDF (fonte 'formulario'); o vencimento do PDF vai junto."""
     corpo = _enviar(cliente_flask, mes="9", ano="2026").get_json()
-    assert corpo["competencia"] == {"mes": 9, "ano": 2026, "fonte": "formulario"}
+    assert corpo["competencia"] == {"mes": 9, "ano": 2026, "fonte": "formulario", "vencimento": "2026-10-10"}
+
+
+def test_formulario_sem_vencimento_no_pdf_traz_vencimento_null(cliente_flask, parser_simulado):
+    """A chave vencimento está sempre presente: null quando o PDF não tem (convenção da ADR-018)."""
+    parser_simulado["vencimento"].return_value = None
+    corpo = _enviar(cliente_flask, mes="9", ano="2026").get_json()
+    assert corpo["competencia"] == {"mes": 9, "ano": 2026, "fonte": "formulario", "vencimento": None}
+
+
+def test_competencia_de_vencimento_em_outro_mes(cliente_flask, parser_simulado):
+    """Dia e mês não se confundem: vencimento 2026-11-05 é competência 11/2026."""
+    parser_simulado["vencimento"].return_value = "2026-11-05"
+    corpo = _enviar(cliente_flask).get_json()
+    assert (corpo["competencia"]["mes"], corpo["competencia"]["ano"]) == (11, 2026)
+    assert {item["data"] for item in corpo["lancamentos"]} == {"2026-11-01"}
 
 
 @pytest.mark.parametrize(
@@ -83,7 +102,7 @@ def test_mes_ano_invalidos_no_formulario_retornam_400(cliente_flask, parser_simu
 
 def test_sem_competencia_detectada_pede_ao_usuario(cliente_flask, parser_simulado, consultar):
     """PDF sem vencimento e sem mes/ano no formulário → 422 com pedir_do_usuario, nada gravado."""
-    parser_simulado["competencia"].return_value = None
+    parser_simulado["vencimento"].return_value = None
     resposta = _enviar(cliente_flask)
     assert resposta.status_code == 422
     assert resposta.get_json() == {"erro": "nao foi possivel detectar o mes/ano", "pedir_do_usuario": True}
@@ -92,7 +111,7 @@ def test_sem_competencia_detectada_pede_ao_usuario(cliente_flask, parser_simulad
 
 def test_sem_competencia_no_pdf_mas_com_formulario_funciona(cliente_flask, parser_simulado):
     """O fallback do 422: o usuário informa mes/ano e a importação segue."""
-    parser_simulado["competencia"].return_value = None
+    parser_simulado["vencimento"].return_value = None
     assert _enviar(cliente_flask, mes="10", ano="2026").status_code == 200
 
 
@@ -141,3 +160,117 @@ def test_importacao_e_atomica(cliente_flask, parser_simulado, consultar):
     resposta = _enviar(cliente_flask)
     assert resposta.status_code == 500
     assert consultar("SELECT COUNT(*) FROM lancamentos") == [(0,)]
+
+
+# Prévia: simular=true (ADR-031) ---------------------------------------------------
+CAFE = {"data": "03/09", "descricao": "CAFE DA ESQUINA", "valor": 8.0, "parcela_atual": None, "parcela_total": None}
+
+
+def _contagens(corpo):
+    return corpo["inseridos"], corpo["ignorados_duplicata"], [item["status"] for item in corpo["lancamentos"]]
+
+
+def test_importacao_normal_traz_simulado_false(cliente_flask, parser_simulado):
+    """Sem o campo, simular é false e a resposta diz isso."""
+    assert _enviar(cliente_flask).get_json()["simulado"] is False
+
+
+def test_simular_nao_grava_nada(cliente_flask, parser_simulado, consultar):
+    """Prévia: mesma resposta (o que seria inserido), simulado true, banco intocado."""
+    assert consultar(CONTAR) == [(0,)]
+    corpo = _enviar(cliente_flask, simular="true").get_json()
+    assert corpo["simulado"] is True
+    assert _contagens(corpo) == (2, 0, ["inserido", "inserido"])
+    assert corpo["total_confere"] is True and corpo["competencia"]["vencimento"] == "2026-10-10"
+    assert consultar(CONTAR) == [(0,)]
+
+
+def test_simular_false_explicito_grava(cliente_flask, parser_simulado, consultar):
+    """simular="false" é a importação de verdade."""
+    assert _enviar(cliente_flask, simular="false").get_json()["simulado"] is False
+    assert consultar(CONTAR) == [(2,)]
+
+
+def test_simular_depois_de_importar_mostra_tudo_ja_importado(cliente_flask, parser_simulado, consultar):
+    """Depois da importação real, a prévia da mesma fatura não traria nada novo."""
+    _enviar(cliente_flask)
+    corpo = _enviar(cliente_flask, simular="true").get_json()
+    assert _contagens(corpo) == (0, 2, ["ignorado_duplicata", "ignorado_duplicata"])
+    assert consultar(CONTAR) == [(2,)]
+
+
+def test_previa_bate_com_a_importacao_real(cliente_flask, parser_simulado, consultar):
+    """Banco com parte da fatura: a prévia prevê exatamente o que a importação real faz."""
+    parser_simulado["lancamentos"].return_value = [EXTRAIDOS[0], CAFE]
+    _enviar(cliente_flask)  # já no banco: LOJA A e 1 café
+    parser_simulado["lancamentos"].return_value = EXTRAIDOS + [CAFE, CAFE]
+    previa = _enviar(cliente_flask, simular="true").get_json()
+    real = _enviar(cliente_flask).get_json()
+    assert _contagens(previa) == _contagens(real) == (
+        2, 2, ["ignorado_duplicata", "inserido", "ignorado_duplicata", "inserido"])
+    assert consultar(CONTAR) == [(4,)]
+
+
+def test_previa_com_dois_iguais_legitimos(cliente_flask, parser_simulado, lancamento_manual):
+    """O caso dos cafés (ADR-010) na prévia: n − m por chave, com a mesma regra da gravação."""
+    parser_simulado["lancamentos"].return_value = [CAFE, CAFE]
+    assert _contagens(_enviar(cliente_flask, simular="true").get_json()) == (2, 0, ["inserido", "inserido"])
+    # Um café já importado (m = 1): só o segundo seria inserido
+    lancamento_manual(descricao="CAFE DA ESQUINA", valor=8.0, data="2026-10-01", origem="fatura")
+    assert _contagens(_enviar(cliente_flask, simular="true").get_json()) == (1, 1, ["ignorado_duplicata", "inserido"])
+    # Um manual idêntico não conta como duplicata (só origem 'fatura')
+    lancamento_manual(descricao="CAFE DA ESQUINA", valor=8.0, data="2026-10-01", origem="manual")
+    assert _contagens(_enviar(cliente_flask, simular="true").get_json())[:2] == (1, 1)
+
+
+def test_simular_sem_competencia_retorna_422(cliente_flask, parser_simulado, consultar):
+    """O 422 de competência não detectada vale igual na prévia."""
+    parser_simulado["vencimento"].return_value = None
+    resposta = _enviar(cliente_flask, simular="true")
+    assert resposta.status_code == 422 and resposta.get_json()["pedir_do_usuario"] is True
+
+
+@pytest.mark.parametrize("valor", ["sim", "1", "True", ""])
+def test_simular_invalido_retorna_400(cliente_flask, parser_simulado, consultar, valor):
+    """Só "true" ou "false"; o resto é 400 antes de processar o PDF."""
+    resposta = _enviar(cliente_flask, simular=valor)
+    assert resposta.status_code == 400 and resposta.get_json() == {"erro": "simular deve ser 'true' ou 'false'"}
+    parser_simulado["lancamentos"].assert_not_called()
+    assert consultar(CONTAR) == [(0,)]
+
+
+# Limite de upload (ADR-031) ----------------------------------------------------------
+@pytest.fixture
+def limite_pequeno(monkeypatch):
+    """Limite de 1 KB no teste, para não gerar um corpo de 5 MB."""
+    monkeypatch.setitem(main.app.config, "MAX_CONTENT_LENGTH", 1024)
+
+
+def test_limite_padrao_e_5_mb():
+    """O valor configurado no app (a fatura real tem ~200 KB)."""
+    assert main.app.config["MAX_CONTENT_LENGTH"] == 5 * 1024 * 1024 == main.TAMANHO_MAXIMO_UPLOAD_MB * 1024 * 1024
+
+
+def test_upload_acima_do_limite_retorna_413_em_json(cliente_flask, limite_pequeno, parser_simulado, consultar,
+                                                    pasta_temp_monitorada):
+    """413 no padrão {"erro"}, sem processar, sem gravar e sem nenhum arquivo temporário."""
+    resposta = _enviar(cliente_flask, conteudo=b"%PDF" + b"0" * 5000)
+    assert resposta.status_code == 413
+    assert resposta.get_json() == {"erro": "arquivo maior que o limite de 5 MB"}
+    parser_simulado["lancamentos"].assert_not_called()
+    assert consultar(CONTAR) == [(0,)]
+    assert list(pasta_temp_monitorada.iterdir()) == []
+
+
+def test_413_sai_com_cabecalho_cors(cliente_flask, limite_pequeno, parser_simulado):
+    """Sem o cabeçalho CORS, o navegador não deixaria a tela ler o 413 (ADR-025)."""
+    resposta = cliente_flask.post(
+        "/fatura/importar", headers={"Origin": "http://localhost:5500"},
+        data={"arquivo": (io.BytesIO(b"%PDF" + b"0" * 5000), "fatura.pdf")}, content_type="multipart/form-data")
+    assert resposta.status_code == 413
+    assert resposta.headers["Access-Control-Allow-Origin"] == "http://localhost:5500"
+
+
+def test_upload_abaixo_do_limite_passa(cliente_flask, limite_pequeno, parser_simulado):
+    """Com o mesmo limite, um arquivo pequeno segue normalmente."""
+    assert _enviar(cliente_flask, conteudo=b"%PDF-pequeno").status_code == 200

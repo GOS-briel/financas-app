@@ -1503,6 +1503,64 @@ Critério 4 da v1: voltar 2 meses no histórico e ver uma categoria. O backend j
 
 ---
 
+## ADR-031 — Importação: prévia sem gravar, limite de upload e vencimento completo
+
+**Data:** 2026-11-23 (decisões e implementação, 12.6a)
+**Status:** Decidido
+
+### Contexto
+
+Mini-etapa de backend para a tela de importação (12.6b). A tela precisa de três coisas que o `POST /fatura/importar` não tinha: mostrar **antes de gravar** o que entraria e o que já existe, recusar com clareza um arquivo grande demais, e exibir a **data completa** do vencimento ("Fatura com vencimento em 10/10 · compras de setembro"). Nada muda na gravação: data `AAAA-MM-01` (ADR-007), competência = mês/ano do vencimento (ADR-009) e deduplicação por contagem (ADR-010).
+
+### Decisões
+
+**1. Prévia: `simular=true`, com a mesma função e sem nenhuma escrita**
+- Campo opcional `simular` no formulário: `"true"` ou `"false"` (padrão false); qualquer outro valor dá 400, antes de processar o PDF.
+- `salvar_lancamentos_fatura(..., gravar=True)`: com `gravar=False`, **o mesmo laço** decide o status de cada lançamento, e só o `INSERT` não é executado.
+- **Por que isso dá exatamente o resultado da importação real:** o `m` (quantas vezes a chave já está no banco) é contado **uma vez por chave, antes de qualquer insert dessa chave**, e o status depende só de `m` e do contador de ocorrências no PDF, **nunca dos inserts** que a própria importação faz. Pular o insert não muda nenhuma decisão.
+- **Por que não transação com rollback:** também reaproveitaria a regra, mas a prévia faria escritas de verdade (trava de escrita do SQLite durante a prévia) e dependeria de nunca esquecer o rollback. Com `gravar=False` a prévia **não executa nenhum SQL de escrita**: "nada gravado" é garantido pela estrutura, não por disciplina.
+- A resposta tem **o mesmo formato** da importação real, com os mesmos status (`inserido` / `ignorado_duplicata`, que na prévia significam "seria inserido" / "já importado") e `"simulado": true` no topo. Toda resposta traz `simulado` (false na importação real).
+
+**2. Limite de upload: 5 MB, com 413 em JSON**
+- `MAX_CONTENT_LENGTH` = `TAMANHO_MAXIMO_UPLOAD_MB` (5) × 1024 × 1024. A fatura real tem ~200 KB: 25× de folga para faturas longas, e ainda pequeno para a memória.
+- O Werkzeug levanta o 413 ao ler o upload, **antes** de qualquer PDF temporário ser criado: o arquivo grande não deixa nada para trás nem chega ao parser.
+- `@app.errorhandler(RequestEntityTooLarge)` responde `413 {"erro": "arquivo maior que o limite de 5 MB"}`, no padrão da API (o do Flask é HTML). A resposta passa pelo `after_request`, então sai **com o cabeçalho CORS** e o navegador consegue lê-la (ADR-025).
+
+**3. Vencimento completo**
+- O leitor ganha `extrair_vencimento()` → `"AAAA-MM-DD"`, com a mesma regex do cabeçalho e validação por `date()` (31/02 vira `None`). `extrair_competencia()` passa a derivar dela.
+- O `main.py` chama só `extrair_vencimento` e deriva mês/ano dela.
+- A resposta traz `competencia.vencimento` **sempre presente** (`null` se o PDF não tiver, convenção da ADR-018): com fonte `pdf` e também com fonte `formulario` (o vencimento detectado vai junto, para a tela mostrar).
+
+### Justificativa
+
+1. Uma regra de deduplicação só, num lugar só: a prévia não pode divergir da importação, porque é o mesmo código.
+2. Prévia sem escrita: o usuário pode simular quantas vezes quiser, sem risco e sem travar o banco.
+3. Mesmos status e mesmo formato: a 12.6b usa um único renderizador para a prévia e para o resultado.
+4. O 413 em JSON com CORS faz o erro chegar à tela como mensagem, não como falha de rede.
+5. O vencimento completo resolve a confusão "vencimento × mês das compras" na tela, sem mexer na competência.
+
+### Validação (12.6a)
+
+- **pytest:** 359 testes passando, nenhum pulado (fatura real presente), cobertura de 98,97%. Novos: prévia não grava; prévia depois de importar (tudo já importado); prévia × importação real com banco parcial (contagens e status iguais, item a item); os dois "cafés" na prévia (n − m, e um manual idêntico não conta); `simular` inválido; 422 com prévia; 413 em JSON sem processar, sem gravar e sem temporário; 413 com CORS; vencimento no leitor (válido, dia ≠ mês, ausente, mês 13, 31/02) e e2e com a fatura real (`2026-10-10`, prévia batendo com a importação).
+- **curl contra o demo:** prévia com 23 novos e nada gravado; importação com 23; nova prévia com 0 novos e 23 já importados; 6 MB → 413 em JSON com CORS, nada gravado e nenhum PDF temporário.
+- **Servidor de desenvolvimento e o 413:** havia o risco de o Werkzeug fechar a conexão sem ler o corpo grande (o cliente veria "conexão resetada"). Não aconteceu: 413 em JSON com e sem `Expect: 100-continue` (o navegador não manda esse cabeçalho), 3 de 3. O navegador em si só será testado na 12.6b.
+
+### Trade-offs aceitos
+
+- Na prévia, `inserido` significa "seria inserido": a tela traduz (ex.: "novo" / "já importado").
+- A prévia é um retrato do momento: se algo for importado entre a prévia e a confirmação, a importação real pode divergir dela (correta, pela mesma regra).
+- A prévia processa o PDF inteiro, e a importação processa de novo (o arquivo é enviado duas vezes). Sem cache de upload no servidor, pela simplicidade.
+- O limite vale para qualquer requisição da API, não só para o upload; nenhuma outra rota chega perto de 5 MB.
+
+### Reabrir se:
+
+- Uma fatura real passar de 5 MB (ajustar `TAMANHO_MAXIMO_UPLOAD_MB`).
+- A 12.6b mostrar no navegador o reset de conexão que o curl não mostrou: a checagem de tamanho no frontend, antes de enviar, já fica prevista para a 12.6b de qualquer forma.
+- O backend for hospedado: o limite passa a ser também do servidor de produção (proxy), não só do Flask.
+- Enviar o arquivo duas vezes pesar: guardar o resultado da prévia no servidor com um token de confirmação.
+
+---
+
 ## Convenções deste arquivo
 
 - Decisões reabertas viram ADR-NNN-v2 com link pra versão anterior.

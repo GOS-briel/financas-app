@@ -116,13 +116,29 @@ def test_total_vem_do_cabecalho(mocker):
     assert leitor.extrair_total_fatura("x.pdf") == 1699.21
 
 
+def test_vencimento_completo_do_cabecalho(mocker):
+    """Vencimento 10/10/2026 vira "2026-10-10" (ADR-031); a competência deriva dele."""
+    mocker.patch.object(leitor, "_texto_primeira_pagina", return_value=CABECALHO)
+    assert leitor.extrair_vencimento("x.pdf") == "2026-10-10"
+
+
+def test_vencimento_com_dia_e_mes_diferentes(mocker):
+    """Dia e mês não se confundem: 05/11/2026 -> 2026-11-05, competência 11/2026."""
+    mocker.patch.object(leitor, "_texto_primeira_pagina",
+                        return_value="Total de fatura Vencimento\nR$ 1,00 05/11/2026 R$ 2,00")
+    assert leitor.extrair_vencimento("x.pdf") == "2026-11-05"
+    assert leitor.extrair_competencia("x.pdf") == {"mes": 11, "ano": 2026}
+
+
 @pytest.mark.parametrize(
-    "texto", ["Fatura sem cabeçalho conhecido", "Vencimento\nR$ 1,00 10/13/2026"],
-    ids=["sem-vencimento", "mes-invalido"],
+    "texto",
+    ["Fatura sem cabeçalho conhecido", "Vencimento\nR$ 1,00 10/13/2026", "Vencimento\nR$ 1,00 31/02/2026"],
+    ids=["sem-vencimento", "mes-invalido", "data-impossivel"],
 )
 def test_competencia_nao_detectada_retorna_none(mocker, texto):
-    """Sem vencimento reconhecível (ou mês fora de 1-12), retorna None para o fallback 422."""
+    """Sem vencimento reconhecível (mês fora de 1-12 ou data impossível): None para o fallback 422."""
     mocker.patch.object(leitor, "_texto_primeira_pagina", return_value=texto)
+    assert leitor.extrair_vencimento("x.pdf") is None
     assert leitor.extrair_competencia("x.pdf") is None
 
 
