@@ -1561,6 +1561,87 @@ Mini-etapa de backend para a tela de importação (12.6b). A tela precisa de tr�
 
 ---
 
+## ADR-032 — Tela de importação: prévia, categorização em lista e aceitar sugestões em lote
+
+**Data:** 2026-11-23 (decisões e implementação, 12.6b)
+**Status:** Decidido
+
+### Contexto
+
+Último critério da v1: importar a fatura, categorizar e ver o impacto. O backend da 12.6a (ADR-031) já dá a prévia sem gravar (`simular`), o limite de 5 MB e o vencimento completo; o `POST categorizar` categoriza e ensina (ADRs 017, 019 e 020). Etapa só de frontend.
+
+### Decisões
+
+**A. Três passos na tela (ícone de upload da barra inferior)**
+1. **Escolher o PDF.** O navegador confere a extensão `.pdf` e o **tamanho ≤ 5 MB antes de enviar** (mesmo limite da ADR-031): fora disso, a mensagem aparece na tela e nenhuma requisição sai.
+2. **Prévia** (`simular=true`, nada gravado): "Vencimento DD/MM/AAAA · compras de <mês anterior> · entra em <Mês Ano>", "N novos · M já importados", o total e se confere com o total do PDF (ou o alerta "não confere: confira antes de importar"), e a lista dos novos (recolhível). **"Importar N lançamentos" é o único botão que grava.** Com N = 0: "Esta fatura já foi importada", com "Ver no Histórico de <mês>" e, se ainda houver itens dela sem categoria, "Categorizar os K que faltam".
+3. **Categorizar:** a lista dos lançamentos daquela competência com origem `fatura` e sem categoria, com a barra "X de N categorizados".
+- **Uma requisição dá a lista e a barra** (`GET /lancamentos?origem=fatura`): N é o tamanho, e o filtro "sem categoria" é feito no navegador, igual ao `sem_categoria=true`.
+- **A lista recarrega depois de cada categorização:** como o categorizar ensina, os itens iguais ganham a sugestão na hora.
+
+**B. Cada item e o seletor compacto**
+- Descrição, valor e, nos parcelados, "Parcela X/Y · faltam Z" (`parcela_total − parcela_atual`, só exibição). A descrição aparece sem o sufixo " - Parcela X/Y" que o parser grava, porque a linha de baixo já diz a parcela.
+- Com sugestão: "Sugestão: <sub>" com **Aceitar** e **Trocar**. Sem sugestão: **Escolher categoria**.
+- **Seletor compacto** dentro do item (um aberto por vez): os 8 ícones de macro numa linha (sem rótulo, com `aria-label`), depois as pills de subcategoria e o "+" de criar (com o 409 da ADR-028). **Escolher (ou criar) a subcategoria já categoriza.**
+- Tudo via `POST categorizar` (ensina, ADR-017), inclusive o seletor.
+
+**C. "Aceitar N sugestões" em lote**
+- Botão secundário com a contagem, abaixo da barra. Categoriza as sugeridas **em sequência**, uma requisição por vez (como os tetos, ADR-029).
+- Falha parcial: "5 de 6 sugestões aceitas. 1 falhou: confira o item marcado e tente de novo"; a falha fica marcada no item, e a lista recarrega com o que deu certo.
+
+**D. Sair a qualquer momento**
+- **"Terminar depois"** e, ao concluir, **"Ver no Dashboard"** levam ao Dashboard **do mês da competência importada** (`trocarMes` antes de mostrar a tela). O que faltar fica em "Sem categoria" no Histórico e no Dashboard.
+- **Sair e voltar retoma a lista:** o store guarda `importacaoEmAndamento = { mes, ano, vencimento }`. "Terminar depois" mantém; "Ver no Dashboard" (tudo categorizado) e "Importar outra fatura" encerram. **Só em memória:** recarregar a página volta ao passo 1 (os pendentes seguem acessíveis pelo Histórico ou por "Categorizar os K que faltam").
+
+**E. Vencimento não detectado (422)**
+- Em vez da prévia: "Não deu para ler o vencimento desta fatura. Em que mês ela entra?", com **dois `<select>` (mês e ano)**, começando no mês do store. O arquivo fica guardado em memória e é reenviado com `mes`/`ano`, tanto na prévia quanto na importação. Selects, e não `<input type="month">`, que o Firefox do desktop não tem.
+- O cabeçalho passa a terminar em "(mês informado)".
+
+**F. Seletor de categoria compartilhado com o Registrar**
+- **Só a lógica** foi extraída para `js/util/seletor-categoria.js` (`seletorCategoria()`): macro, subcategoria, criação inline e o 409 da ADR-012, mais `focarQuandoVisivel` (ADR-028 G). O Registrar e a Importar a usam; os nomes de campo não mudaram.
+- A mescla com cada tela **copia os descritores** (`mesclarComponente`, com `Object.getOwnPropertyDescriptors`): um `{...spread}` avaliaria os getters (como `subSelecionada`) uma vez só, e eles parariam de reagir.
+- Gancho opcional `depoisDeEscolherSub(id)`: a Importar categoriza ao escolher; o Registrar não define e só seleciona.
+- **O markup não é compartilhado:** a grade grande do Registrar ficou intacta, e a Importar tem o seletor compacto. Sem build, o Alpine não tem componente de template; duplicar só o HTML é o caminho mais seguro.
+
+### "Compras de <mês anterior>" é aproximação
+
+O cabeçalho diz "compras de setembro" para a fatura que vence em 10/10. A fatura do Bradesco fecha por volta do dia 27, então parte das compras é do fim do mês antes desse (ex.: de 27/08 a 31/08 numa fatura "de setembro"). É um texto de orientação para a confusão vencimento × mês das compras (ADR-009), não um dado exato; a competência continua sendo o mês do vencimento.
+
+### Justificativa
+
+1. Prévia antes de gravar: o usuário vê vencimento, quantidade e conferência do total antes de qualquer escrita, e uma fatura lida errada nunca entra.
+2. Categorizar em lista, com a barra: categorizar 20 a 50 itens é a parte longa; a lista ordenada, o Aceitar em um toque e o lote reduzem isso a poucos toques depois da primeira fatura.
+3. Tudo ensina: na importação, cada escolha é uma confirmação explícita de "essa loja é dessa categoria" (ADR-017).
+4. Sair a qualquer momento sem perder nada: o que falta é visível em "Sem categoria".
+5. Uma só lógica de seletor: o Registrar e a Importar não divergem nas regras de criação e do 409.
+
+### Validação (12.6b)
+
+- **Headless (Edge, tempo real, demo na 5001, fatura de teste via `FATURA_PDF_PATH` servida sem cópia):** 45 verificações da importação, todas OK em duas rodadas. Cobre: não-PDF e 6 MB recusados sem requisição; 422 com os selects; cabeçalho, contagens e "confere"; prévia sem gravar; importação; barra; texto de parcela; sair e voltar retomando; Aceitar; seletor compacto com criação e 409 (e o item igual de outro mês ganhando a sugestão); "Aceitar 3" em sequência com falha parcial simulada; "Terminar depois" e "Ver no Dashboard" no mês da competência; N = 0 com ida ao Histórico.
+- **Regressões:** 12.4 (51/51), 12.5 (51/51) e 12.7 (46/46), depois da extração do seletor. `pytest`: 359 passando (backend inalterado).
+- **Navegador (Gabriel), parte (a) com o demo:** roteiro completo OK.
+- **Parte (b), uso real com o backend normal:** 7 faturas reais importadas, todas com "confere com a fatura" na prévia, cada uma no mês do próprio vencimento e sem duplicatas (com backup do banco antes). Duas faturas categorizadas pela tela, com subcategorias novas criadas pelo "+" e sugestões aceitas nas lojas repetidas: o aprendizado já tinha padrões com confiança > 1 ao fim do teste.
+- **Só no PC:** toda a validação até aqui foi no desktop (headless e Chrome; o modo celular do DevTools testou só a largura). Toque, teclado virtual e foco no celular ficam para a 12.8/12.9.
+
+### Trade-offs aceitos
+
+- **A categorização em andamento fica só em memória:** recarregar a página volta ao passo 1.
+- **O PDF é enviado duas vezes** (prévia e importação), como já previsto na ADR-031.
+- **A barra conta todos os itens de fatura da competência**, inclusive os de importações anteriores do mesmo mês (na prática, a mesma fatura).
+- **Lista sem ordenação própria:** segue a do `GET /lancamentos` (data desc, id desc).
+- O markup do seletor existe em dois lugares (Registrar e Importar); a lógica é uma só.
+- "Compras de <mês anterior>" é aproximação (seção própria acima).
+
+### Reabrir se:
+
+- Recarregar a página no meio da categorização acontecer na prática: guardar a competência em andamento no `localStorage`.
+- O lote de sugestões ficar lento com muitas faturas: endpoint de categorização em lote no backend.
+- O uso real mostrar sugestões erradas aceitas no lote: "Aceitar N" pedir revisão antes, ou só aceitar as de confiança alta (ADR-020).
+- O celular (12.8/12.9) mostrar problemas no seletor compacto (alvos de toque de 8 ícones numa linha em 360 px).
+- Outro banco for suportado: o "compras de <mês anterior>" depende do fechamento do Bradesco.
+
+---
+
 ## Convenções deste arquivo
 
 - Decisões reabertas viram ADR-NNN-v2 com link pra versão anterior.

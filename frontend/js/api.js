@@ -88,14 +88,16 @@
     categorizar: (id, subcategoriaId) =>
       post(`/lancamentos/${id}/categorizar`, { subcategoria_id: subcategoriaId }),
 
-    // Importação da fatura (ADRs 009-010): multipart; mes/ano opcionais
-    importarFatura: (arquivo, mes, ano) => {
+    // Importação da fatura (ADRs 009, 010 e 031): multipart; mes/ano opcionais
+    // (prioridade sobre o PDF); simular=true é a prévia, que não grava nada
+    importarFatura: (arquivo, { mes, ano, simular = false } = {}) => {
       const formulario = new FormData();
       formulario.append('arquivo', arquivo);
       if (mes && ano) {
         formulario.append('mes', String(mes));
         formulario.append('ano', String(ano));
       }
+      formulario.append('simular', simular ? 'true' : 'false');
       return post('/fatura/importar', formulario);
     },
   };

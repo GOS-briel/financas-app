@@ -23,7 +23,8 @@ frontend/
   js/api.js             window.api — todas as rotas do backend
   js/app.js             Alpine.store('app') — estado compartilhado
   js/telas/             Alpine.data por tela
-  js/util/              formatadores (window.formatar), máscara de centavos (window.mascaraCentavos)
+  js/util/              formatadores (window.formatar), máscara de centavos (window.mascaraCentavos),
+                        seletor de categoria (window.seletorCategoria + mesclarComponente)
 scripts/demo_dashboard.py   API com banco fictício para testes visuais
 scripts/servidor_frontend.py  serve frontend/ sem cache (desenvolvimento)
 tests/                  unit / integration / e2e (pytest, ADR-024)

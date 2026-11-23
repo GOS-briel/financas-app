@@ -700,6 +700,147 @@ body {
   opacity: 0.5;
 }
 
+/* ---------- Importar (ADR-032) ---------- */
+.importar__passo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-md);
+}
+
+.importar__acoes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--espaco-sm) var(--espaco-md);
+}
+
+/* <label> com o <input type="file"> escondido: o botão é o rótulo */
+.botao-arquivo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--espaco-sm);
+  cursor: pointer;
+}
+
+.botao-arquivo:focus-within {
+  outline: 2px solid var(--cor-primaria);
+  outline-offset: 2px;
+}
+
+.botao-arquivo.desativado {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.importar__mes {
+  display: flex;
+  gap: var(--espaco-sm);
+}
+
+.importar__competencia {
+  font-weight: 600;
+}
+
+.importar__contagem {
+  font-size: 1.125rem;
+}
+
+.importar__total--alerta {
+  color: var(--cor-estado-alerta-texto);
+  font-weight: 600;
+}
+
+.importar__lista-previa summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.importar__ja,
+.importar__fim {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-sm);
+}
+
+.importar__progresso {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-xs);
+}
+
+.lista-importar {
+  display: flex;
+  flex-direction: column;
+  transition: opacity 0.2s;
+}
+
+.lista-importar.atualizando {
+  opacity: 0.45;
+}
+
+.item-importar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--espaco-sm);
+  padding: var(--espaco-sm) 0;
+  border-bottom: 1px solid var(--cor-borda);
+}
+
+.item-importar__linha {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--espaco-md);
+}
+
+.item-importar__linha .lancamento__texto {
+  display: flex;
+  flex-direction: column;
+}
+
+.item-importar__escolher {
+  align-self: flex-start;
+}
+
+/* Seletor compacto: 8 ícones de macro numa linha, depois as pills */
+.seletor-compacto {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espaco-sm);
+  padding: var(--espaco-sm);
+  border: 1px solid var(--cor-borda);
+  border-radius: var(--raio);
+}
+
+.seletor-compacto__macros {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: var(--espaco-xs);
+}
+
+.macro-icone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  max-height: 44px;
+  border: 1px solid var(--cor-borda);
+  border-radius: var(--raio);
+  font-size: 1.25rem;
+}
+
+.macro-icone[aria-pressed="true"] {
+  border-color: var(--cor-primaria);
+  background: var(--cor-primaria);
+  color: var(--cor-fundo);
+}
+
+.seletor-compacto .pill:disabled {
+  opacity: 0.5;
+}
+
 /* ---------- Tetos ---------- */
 .faixa-pendente {
   display: flex;

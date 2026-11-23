@@ -31,6 +31,9 @@ document.addEventListener('alpine:init', () => {
     // Lançamento (formato do GET /lancamentos) aberto no Registrar em modo
     // edição (ADR-030); null = Registrar no modo "novo gasto"
     lancamentoEmEdicao: null,
+    // Fatura importada ainda em categorização (ADR-032): { mes, ano, vencimento }.
+    // Só em memória: sair e voltar à tela retoma a lista; recarregar a página, não.
+    importacaoEmAndamento: null,
 
     // O Alpine chama init() do store automaticamente, logo após registrá-lo
     init() {

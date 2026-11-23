@@ -1,28 +1,10 @@
 // Tela Registrar gasto (ADR-028). Meta: valor → macro → sub → salvar em < 10s.
 // Estado local da tela (ADR-026); categorias vêm do store compartilhado.
 
-// Ícones Tabler das macro, pelos ids canônicos da ADR-005
-const ICONE_DA_MACRO = {
-  1: 'ti-tools-kitchen-2', // Alimentação
-  2: 'ti-confetti',        // Lazer
-  3: 'ti-shopping-bag',    // Compras
-  4: 'ti-heartbeat',       // Saúde
-  5: 'ti-school',          // Educação
-  6: 'ti-ball-football',   // Esporte
-  7: 'ti-car',             // Transporte
-  8: 'ti-dots',            // Outros
-};
+// Seletor de categoria (grade, pills, criação e 409): js/util/seletor-categoria.js
 
 // Mesma janela do backend (ADR-015): hoje − 90 entra, data futura nunca
 const DIAS_RETROATIVO_MAXIMO = 90;
-// Limites do backend (main.py)
-const MAXIMO_NOME_SUBCATEGORIA = 50;
-
-// Comparação de nomes como a ADR-012 (o backend usa NFC + casefold;
-// toLowerCase dá o mesmo resultado para nomes em português)
-function comparavel(nome) {
-  return nome.normalize('NFC').toLowerCase();
-}
 
 // Data local de N dias atrás, como "AAAA-MM-DD" (nunca toISOString: é UTC)
 function isoDiasAtras(dias) {
@@ -30,25 +12,9 @@ function isoDiasAtras(dias) {
   return formatar.dataIso(new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() - dias));
 }
 
-// O x-show do Alpine só exibe o elemento no quadro seguinte (requestAnimationFrame,
-// ou setTimeout com a aba oculta) — DEPOIS do $nextTick. Um focus() num elemento
-// ainda escondido falha em silêncio. Espera com o MESMO agendador do Alpine:
-// o nosso callback entra na fila depois do que exibe o elemento.
-function focarQuandoVisivel(elemento, tentativas = 10) {
-  if (elemento.getClientRects().length > 0) {
-    elemento.focus();
-    return;
-  }
-  if (tentativas === 0) return;
-  const proximo = document.visibilityState === 'visible' ? requestAnimationFrame : setTimeout;
-  proximo(() => focarQuandoVisivel(elemento, tentativas - 1));
-}
-
 document.addEventListener('alpine:init', () => {
-  Alpine.data('registrar', () => ({
+  Alpine.data('registrar', () => mesclarComponente(seletorCategoria(), {
     centavos: 0,          // valor como inteiro: 3250 = R$ 32,50 (sem erro de float)
-    macroId: null,
-    subId: null,
     descricao: '',
     nota: '',
     mostrarNota: false,
@@ -58,12 +24,6 @@ document.addEventListener('alpine:init', () => {
     hojeIso: '',
     ontemIso: '',
     minimoIso: '',
-    // Criação inline de subcategoria (decisão F)
-    criando: false,
-    nomeNovo: '',
-    criandoEnviando: false,
-    erroCriar: '',
-    mensagemSub: '',
     enviando: false,
     erro: '',
     // Modo edição (ADR-030): base do lançamento como está no banco, para
@@ -161,98 +121,9 @@ document.addEventListener('alpine:init', () => {
       mascaraCentavos.cursorNoFim(this.$refs.valor);
     },
 
-    // ---------- Categoria (decisão B) ----------
-    get macros() {
-      return this.$store.app.categorias;
-    },
+    // ---------- Categoria (decisão B): lógica em seletorCategoria() ----------
     get semCategorias() {
       return this.macros.length === 0;
-    },
-    get macroSelecionada() {
-      return this.macros.find((m) => m.id === this.macroId) ?? null;
-    },
-    get subcategorias() {
-      return this.macroSelecionada?.subcategorias ?? [];
-    },
-    get subSelecionada() {
-      return this.subcategorias.find((s) => s.id === this.subId) ?? null;
-    },
-    icone(macroId) {
-      return ICONE_DA_MACRO[macroId] ?? 'ti-category';
-    },
-    escolherMacro(id) {
-      if (this.macroId === id) return;
-      this.macroId = id;
-      this.subId = null;
-      this.mensagemSub = '';
-      this.fecharCriacao();
-      // Macro sem subcategoria: abre direto a criação
-      if (this.subcategorias.length === 0) this.abrirCriacao();
-    },
-    escolherSub(id) {
-      this.subId = id;
-      this.mensagemSub = '';
-    },
-
-    // ---------- Criação inline de subcategoria (decisão F) ----------
-    abrirCriacao() {
-      this.criando = true;
-      this.nomeNovo = '';
-      this.erroCriar = '';
-      this.$nextTick(() => focarQuandoVisivel(this.$refs.novoNome));
-    },
-    fecharCriacao() {
-      this.criando = false;
-      this.nomeNovo = '';
-      this.erroCriar = '';
-    },
-    async criarSub() {
-      const nome = this.nomeNovo.trim();
-      if (!nome) {
-        this.erroCriar = 'Digite um nome.';
-        return;
-      }
-      if (nome.length > MAXIMO_NOME_SUBCATEGORIA) {
-        this.erroCriar = `Use no máximo ${MAXIMO_NOME_SUBCATEGORIA} caracteres.`;
-        return;
-      }
-      if (this.criandoEnviando) return;
-      const macroId = this.macroId;
-      this.criandoEnviando = true;
-      this.erroCriar = '';
-      try {
-        const criada = await api.criarSubcategoria(nome, macroId);
-        await this.$store.app.recarregarCategorias();
-        this.escolherSub(criada.id);
-        this.mensagemSub = `“${criada.nome}” criada e selecionada.`;
-        this.fecharCriacao();
-      } catch (erro) {
-        if (erro.status === 409) {
-          await this.usarExistente(nome, macroId);
-        } else {
-          this.erroCriar = api.mensagemDeErro(erro);
-        }
-      } finally {
-        this.criandoEnviando = false;
-      }
-    },
-    // O 409 não devolve o id: recarrega e acha o nome na macro
-    async usarExistente(nome, macroId) {
-      try {
-        await this.$store.app.recarregarCategorias();
-      } catch (erro) {
-        this.erroCriar = api.mensagemDeErro(erro);
-        return;
-      }
-      const macro = this.macros.find((m) => m.id === macroId);
-      const existente = macro?.subcategorias.find((s) => comparavel(s.nome) === comparavel(nome));
-      if (!existente) {
-        this.erroCriar = 'Já existe uma subcategoria com esse nome, mas não foi possível encontrá-la.';
-        return;
-      }
-      this.escolherSub(existente.id);
-      this.mensagemSub = `“${existente.nome}” já existia e foi selecionada.`;
-      this.fecharCriacao();
     },
 
     // ---------- Data (decisão E) ----------

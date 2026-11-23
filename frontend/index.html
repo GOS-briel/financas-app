@@ -21,6 +21,7 @@
   <script defer src="js/api.js"></script>
   <script defer src="js/util/formatadores.js"></script>
   <script defer src="js/util/mascara.js"></script>
+  <script defer src="js/util/seletor-categoria.js"></script>
   <script defer src="js/telas/dashboard.js"></script>
   <script defer src="js/telas/registrar.js"></script>
   <script defer src="js/telas/tetos.js"></script>
@@ -451,8 +452,202 @@
       </template>
     </section>
 
-    <section class="tela" x-data="importar" x-show="$store.app.telaAtiva === 'importar'" x-cloak>
-      <h1>Importar - em construção</h1>
+    <section class="tela importar" x-data="importar" x-show="$store.app.telaAtiva === 'importar'" x-cloak>
+      <h1>Importar fatura</h1>
+
+      <!-- Passo 1: escolher o PDF (tamanho conferido no navegador, ADR-031/032) -->
+      <div class="importar__passo" x-show="passo === 'escolher'">
+        <p class="texto-secundario">PDF da fatura Bradesco, até 5 MB. Antes de gravar, você vê uma prévia.</p>
+        <label class="botao-primario botao-arquivo" :class="{ 'desativado': enviando }">
+          <i class="ti ti-file-upload" aria-hidden="true"></i>
+          <span x-text="enviando ? 'Lendo a fatura…' : 'Escolher fatura (PDF)'"></span>
+          <input type="file" class="oculto-visualmente" x-ref="arquivo" accept=".pdf,application/pdf"
+                 :disabled="enviando" @change="selecionarArquivo($event)">
+        </label>
+        <p class="erro-campo" role="alert" x-show="erroArquivo" x-text="erroArquivo"></p>
+      </div>
+
+      <!-- Passo 2a: vencimento não detectado (422) — o usuário informa o mês -->
+      <div class="importar__passo cartao" x-show="passo === 'previa' && pedirMes">
+        <p>Não deu para ler o vencimento desta fatura. Em que mês ela entra?</p>
+        <div class="importar__mes">
+          <label>
+            <span class="oculto-visualmente">Mês</span>
+            <select class="campo" x-model.number="mesInformado">
+              <template x-for="m in opcoesMes" :key="m.valor">
+                <option :value="m.valor" x-text="m.nome" :selected="m.valor === mesInformado"></option>
+              </template>
+            </select>
+          </label>
+          <label>
+            <span class="oculto-visualmente">Ano</span>
+            <select class="campo" x-model.number="anoInformado">
+              <template x-for="a in opcoesAno" :key="a">
+                <option :value="a" x-text="a" :selected="a === anoInformado"></option>
+              </template>
+            </select>
+          </label>
+        </div>
+        <div class="importar__acoes">
+          <button type="button" class="botao-primario" :disabled="enviando" @click="confirmarMes()"
+                  x-text="enviando ? 'Lendo a fatura…' : 'Ver prévia'"></button>
+          <button type="button" class="botao-link" :disabled="enviando" @click="recomecar()">Escolher outro arquivo</button>
+        </div>
+      </div>
+
+      <!-- Passo 2: prévia (simular=true: nada gravado) -->
+      <template x-if="passo === 'previa' && previa">
+        <div class="importar__passo">
+          <p class="cartao importar__competencia" x-text="textoCompetencia"></p>
+          <p class="numero importar__contagem">
+            <strong x-text="`${quantidadeNovos} ${quantidadeNovos === 1 ? 'novo' : 'novos'}`"></strong>
+            · <span x-text="`${previa.ignorados_duplicata} já ${previa.ignorados_duplicata === 1 ? 'importado' : 'importados'}`"></span>
+          </p>
+          <p class="importar__total" :class="{ 'importar__total--alerta': previa.total_confere === false }"
+             x-text="textoTotal"></p>
+
+          <details class="importar__lista-previa" x-show="novos.length > 0">
+            <summary x-text="`Ver os ${novos.length} novos`"></summary>
+            <ul class="lista-lancamentos">
+              <template x-for="(l, i) in novos" :key="i">
+                <li class="lancamento">
+                  <span class="lancamento__descricao" x-text="l.descricao"></span>
+                  <span class="numero lancamento__valor" x-text="formatar.dinheiro(l.valor)"></span>
+                </li>
+              </template>
+            </ul>
+          </details>
+
+          <!-- N > 0: só este botão grava -->
+          <div class="importar__acoes" x-show="quantidadeNovos > 0">
+            <button type="button" class="botao-primario" :disabled="enviando" @click="importar()" x-text="textoBotaoImportar"></button>
+            <button type="button" class="botao-link" :disabled="enviando" @click="recomecar()">Escolher outro arquivo</button>
+          </div>
+
+          <!-- N = 0: já importada -->
+          <div class="cartao importar__ja" x-show="quantidadeNovos === 0">
+            <p>Esta fatura já foi importada.</p>
+            <div class="importar__acoes">
+              <button type="button" class="botao-secundario" x-show="pendentesJaImportada > 0"
+                      @click="iniciarCategorizacao(previa.competencia)"
+                      x-text="`Categorizar os ${pendentesJaImportada} que faltam`"></button>
+              <button type="button" class="botao-secundario" @click="irParaHistorico()"
+                      x-text="`Ver no Histórico de ${rotuloMesCompetencia}`"></button>
+              <button type="button" class="botao-link" @click="recomecar()">Escolher outro arquivo</button>
+            </div>
+          </div>
+          <p class="erro-campo" role="alert" x-show="erroArquivo" x-text="erroArquivo"></p>
+        </div>
+      </template>
+
+      <!-- Passo 3: categorizar em lista (tudo via POST categorizar, que ensina) -->
+      <template x-if="passo === 'categorizar' && competencia">
+        <div class="importar__passo">
+          <p class="texto-secundario" x-text="`Fatura de ${rotuloCompetencia}`"></p>
+
+          <div class="importar__progresso">
+            <p class="numero" aria-live="polite" x-text="textoBarra"></p>
+            <div class="barra" role="progressbar" aria-label="Lançamentos categorizados" aria-valuemin="0"
+                 aria-valuemax="100" :aria-valuenow="percentual">
+              <div class="barra__preenchimento" :style="`width: ${percentual}%`"></div>
+            </div>
+          </div>
+
+          <button type="button" class="botao-secundario" x-show="sugeridos.length > 0 && !concluido"
+                  :disabled="aceitandoTodas || ocupado !== null" @click="aceitarTodas()" x-text="textoAceitarTodas"></button>
+          <p class="texto-pequeno" aria-live="polite" x-text="mensagem"></p>
+
+          <p class="texto-secundario" x-show="carregandoLista && total === 0">Carregando…</p>
+          <div class="dash-erro" x-show="erroLista && !carregandoLista">
+            <p class="erro-campo" x-text="erroLista"></p>
+            <button type="button" class="botao-secundario" @click="carregarLista()">
+              <i class="ti ti-refresh" aria-hidden="true"></i> Tentar de novo
+            </button>
+          </div>
+
+          <!-- Tudo categorizado -->
+          <div class="cartao importar__fim" x-show="concluido">
+            <p><strong>Tudo categorizado</strong> · <span class="numero" x-text="`${categorizados} de ${total}`"></span></p>
+            <div class="importar__acoes">
+              <button type="button" class="botao-primario" @click="irParaDashboard({ encerrar: true })">Ver no Dashboard</button>
+              <button type="button" class="botao-link" @click="recomecar()">Importar outra fatura</button>
+            </div>
+          </div>
+
+          <ul class="lista-importar" x-show="!concluido" :class="{ 'atualizando': carregandoLista && total > 0 }">
+            <template x-for="l in pendentes" :key="l.id">
+              <li class="item-importar" :data-id="l.id">
+                <div class="item-importar__linha">
+                  <span class="lancamento__texto">
+                    <span class="lancamento__descricao" x-text="descricaoExibida(l)"></span>
+                    <span class="texto-secundario texto-pequeno" x-show="l.parcela_total" x-text="textoParcela(l)"></span>
+                  </span>
+                  <span class="numero lancamento__valor" x-text="formatar.dinheiro(l.valor)"></span>
+                </div>
+
+                <div class="sugestao" x-show="l.subcategoria_sugerida && itemAberto !== l.id">
+                  <span>Sugestão: <strong x-text="l.subcategoria_sugerida?.nome"></strong></span>
+                  <button type="button" class="botao-link" :disabled="ocupado !== null || aceitandoTodas" @click="aceitar(l)">Aceitar</button>
+                  <button type="button" class="botao-link" @click="abrirSeletor(l)">Trocar</button>
+                </div>
+                <button type="button" class="botao-link texto-pequeno item-importar__escolher"
+                        x-show="!l.subcategoria_sugerida && itemAberto !== l.id" @click="abrirSeletor(l)">
+                  Escolher categoria
+                </button>
+
+                <!-- Seletor compacto: macro (ícones) -> subcategoria; escolher já categoriza -->
+                <template x-if="itemAberto === l.id">
+                  <div class="seletor-compacto">
+                    <div class="seletor-compacto__macros" role="group" aria-label="Categoria">
+                      <template x-for="m in macros" :key="m.id">
+                        <button type="button" class="macro-icone" :aria-label="m.nome" :title="m.nome"
+                                :aria-pressed="(macroId === m.id).toString()" @click="escolherMacro(m.id)">
+                          <i class="ti" :class="icone(m.id)" aria-hidden="true"></i>
+                        </button>
+                      </template>
+                    </div>
+                    <p class="texto-pequeno texto-secundario" x-show="macroSelecionada" x-text="macroSelecionada?.nome"></p>
+                    <div class="pills" x-show="macroSelecionada">
+                      <template x-for="s in subcategorias" :key="s.id">
+                        <button type="button" class="pill" :disabled="ocupado !== null" @click="escolherSub(s.id)"
+                                x-text="s.nome"></button>
+                      </template>
+                      <button type="button" class="pill pill--icone" x-show="!criando" @click="abrirCriacao()"
+                              :aria-label="`Criar subcategoria em ${macroSelecionada?.nome ?? ''}`">
+                        <i class="ti ti-plus" aria-hidden="true"></i>
+                      </button>
+                    </div>
+                    <div class="criar-sub" x-show="criando">
+                      <input type="text" class="campo" x-ref="novoNome" x-model="nomeNovo" maxlength="50"
+                             :aria-label="`Nome da nova subcategoria em ${macroSelecionada?.nome ?? ''}`"
+                             placeholder="Nome da subcategoria"
+                             @keydown.enter.prevent="criarSub()" @keydown.escape.prevent="fecharCriacao()">
+                      <button type="button" class="botao-secundario" :disabled="criandoEnviando" @click="criarSub()">
+                        Criar e usar
+                      </button>
+                    </div>
+                    <p class="erro-campo" role="alert" x-show="erroCriar" x-text="erroCriar"></p>
+                    <button type="button" class="botao-link texto-pequeno" @click="fecharSeletor()">Cancelar</button>
+                  </div>
+                </template>
+
+                <p class="erro-campo" role="alert" x-show="errosItem[l.id]" x-text="`Não categorizou: ${errosItem[l.id]}`"></p>
+              </li>
+            </template>
+          </ul>
+
+          <!-- Decisão D: dá para sair a qualquer momento -->
+          <div class="importar__acoes" x-show="!concluido">
+            <button type="button" class="botao-link" @click="irParaDashboard({ encerrar: false })">
+              Terminar depois
+            </button>
+            <button type="button" class="botao-link" @click="recomecar()">Importar outra fatura</button>
+          </div>
+          <p class="texto-secundario texto-pequeno" x-show="!concluido">
+            O que faltar fica em "Sem categoria" no Histórico e no Dashboard.
+          </p>
+        </div>
+      </template>
     </section>
   </main>
 
